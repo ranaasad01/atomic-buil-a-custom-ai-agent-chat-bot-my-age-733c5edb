@@ -1,0 +1,98 @@
+{
+  "nav": {
+    "chat": "Chat",
+    "history": "History",
+    "settings": "Settings"
+  },
+  "footer": {
+    "navigation": "Navigation",
+    "poweredBy": "Powered By",
+    "copyright": "© 2025 QA Agent AI. Built with Claude 3.5 Sonnet."
+  },
+  "hero": {
+    "badge": "Powered by Claude 3.5 Sonnet",
+    "title": "Your AI-Powered QA Engineer",
+    "subtitle": "Paste any live URL and get production-ready Playwright, Cypress, and Selenium test scripts in seconds.",
+    "cta": "Start Testing",
+    "ctaSecondary": "View History"
+  },
+  "features": {
+    "title": "Everything Your QA Team Needs",
+    "subtitle": "From URL analysis to downloadable test scripts and Excel sheets."
+  },
+  "chat": {
+    "placeholder": "Describe what to test...",
+    "urlPlaceholder": "https://example.com",
+    "send": "Send",
+    "newChat": "New Chat",
+    "emptyState": "Enter a URL above to begin testing",
+    "thinking": "Thinking...",
+    "ready": "Ready",
+    "error": "Error"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Configure your QA Agent AI",
+    "apiKey": {
+      "title": "API Key Configuration",
+      "envTitle": "Environment Variable",
+      "runtimeTitle": "Runtime Key",
+      "placeholder": "sk-ant-...",
+      "save": "Save API Key",
+      "saved": "Saved!",
+      "error": "Save failed",
+      "showKey": "Show",
+      "hideKey": "Hide"
+    },
+    "prompt": {
+      "title": "Agent System Prompt",
+      "save": "Save Prompt",
+      "reset": "Reset to Default",
+      "saved": "Prompt saved!"
+    },
+    "frameworks": {
+      "title": "Framework Preferences",
+      "save": "Save Frameworks"
+    },
+    "danger": {
+      "title": "Danger Zone",
+      "clearHistory": "Clear Chat History",
+      "clearHistoryDesc": "Delete all past chat sessions. This cannot be undone.",
+      "resetAll": "Reset All Settings",
+      "resetAllDesc": "Restore all settings to defaults including API key and prompts.",
+      "confirm": "Are you sure? This cannot be undone.",
+      "confirmBtn": "Confirm",
+      "cancelBtn": "Cancel"
+    }
+  },
+  "history": {
+    "title": "Test History",
+    "subtitle": "Browse and resume your past QA sessions",
+    "empty": "No sessions yet. Start a new chat to begin testing.",
+    "resume": "Resume",
+    "delete": "Delete",
+    "search": "Search sessions..."
+  },
+  "historyPage": {
+    "title": "History"
+  },
+  "settingsPage": {
+    "title": "Settings"
+  },
+  "cta": {
+    "title": "Ready to Automate Your QA?",
+    "subtitle": "Join teams using AI to ship faster with confidence.",
+    "button": "Launch QA Agent",
+    "secondary": "Configure Settings"
+  },
+  "howItWorks": {
+    "title": "How It Works",
+    "subtitle": "From URL to Test Suite in Seconds"
+  },
+  "frameworks": {
+    "title": "Generate Scripts for Any Framework"
+  },
+  "testimonials": {
+    "title": "Trusted by QA Teams"
+  }
+}

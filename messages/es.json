@@ -1,0 +1,98 @@
+{
+  "nav": {
+    "chat": "Chat",
+    "history": "Historial",
+    "settings": "Configuración"
+  },
+  "footer": {
+    "navigation": "Navegación",
+    "poweredBy": "Impulsado por",
+    "copyright": "© 2025 QA Agent AI. Construido con Claude 3.5 Sonnet."
+  },
+  "hero": {
+    "badge": "Impulsado por Claude 3.5 Sonnet",
+    "title": "Tu Ingeniero QA con IA",
+    "subtitle": "Pega cualquier URL en vivo y obtén scripts de prueba listos para producción en segundos.",
+    "cta": "Comenzar Pruebas",
+    "ctaSecondary": "Ver Historial"
+  },
+  "features": {
+    "title": "Todo lo que tu Equipo QA Necesita",
+    "subtitle": "Desde análisis de URL hasta scripts descargables y hojas Excel."
+  },
+  "chat": {
+    "placeholder": "Describe qué probar...",
+    "urlPlaceholder": "https://ejemplo.com",
+    "send": "Enviar",
+    "newChat": "Nuevo Chat",
+    "emptyState": "Ingresa una URL arriba para comenzar",
+    "thinking": "Pensando...",
+    "ready": "Listo",
+    "error": "Error"
+  },
+  "settings": {
+    "title": "Configuración",
+    "subtitle": "Configura tu QA Agent AI",
+    "apiKey": {
+      "title": "Configuración de API Key",
+      "envTitle": "Variable de Entorno",
+      "runtimeTitle": "Clave en Tiempo de Ejecución",
+      "placeholder": "sk-ant-...",
+      "save": "Guardar API Key",
+      "saved": "¡Guardado!",
+      "error": "Error al guardar",
+      "showKey": "Mostrar",
+      "hideKey": "Ocultar"
+    },
+    "prompt": {
+      "title": "Prompt del Sistema del Agente",
+      "save": "Guardar Prompt",
+      "reset": "Restablecer",
+      "saved": "¡Prompt guardado!"
+    },
+    "frameworks": {
+      "title": "Preferencias de Framework",
+      "save": "Guardar Frameworks"
+    },
+    "danger": {
+      "title": "Zona de Peligro",
+      "clearHistory": "Borrar Historial",
+      "clearHistoryDesc": "Elimina todas las sesiones anteriores. No se puede deshacer.",
+      "resetAll": "Restablecer Todo",
+      "resetAllDesc": "Restaura toda la configuración a los valores predeterminados.",
+      "confirm": "¿Estás seguro? No se puede deshacer.",
+      "confirmBtn": "Confirmar",
+      "cancelBtn": "Cancelar"
+    }
+  },
+  "history": {
+    "title": "Historial de Pruebas",
+    "subtitle": "Navega y retoma tus sesiones QA anteriores",
+    "empty": "Sin sesiones aún. Inicia un nuevo chat para comenzar.",
+    "resume": "Reanudar",
+    "delete": "Eliminar",
+    "search": "Buscar sesiones..."
+  },
+  "historyPage": {
+    "title": "Historial"
+  },
+  "settingsPage": {
+    "title": "Configuración"
+  },
+  "cta": {
+    "title": "¿Listo para Automatizar tu QA?",
+    "subtitle": "Únete a equipos que usan IA para lanzar más rápido con confianza.",
+    "button": "Lanzar QA Agent",
+    "secondary": "Configurar Ajustes"
+  },
+  "howItWorks": {
+    "title": "Cómo Funciona",
+    "subtitle": "De URL a Suite de Pruebas en Segundos"
+  },
+  "frameworks": {
+    "title": "Genera Scripts para Cualquier Framework"
+  },
+  "testimonials": {
+    "title": "Confiado por Equipos QA"
+  }
+}
