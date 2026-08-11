@@ -11,10 +11,10 @@ export async function POST(req: NextRequest) {
       apiKey?: string;
     };
 
-    const key = apiKey || process.env.ANTHROPIC_API_KEY;
+    const key = apiKey || process.env.LLM_API_KEY || process.env.ANTHROPIC_API_KEY;
     if (!key) {
       return NextResponse.json(
-        { error: 'No API key provided. Add ANTHROPIC_API_KEY to .env.local or provide it in Settings.' },
+        { error: 'No API key provided. Add your API key to .env.local or provide it in Settings.' },
         { status: 401 }
       );
     }
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       const err = await response.text();
       return NextResponse.json(
-        { error: `Anthropic API error: ${response.status} - ${err}` },
+        { error: `API error: ${response.status} - ${err}` },
         { status: response.status }
       );
     }

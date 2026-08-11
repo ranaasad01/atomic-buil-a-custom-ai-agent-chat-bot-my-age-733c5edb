@@ -54,11 +54,27 @@ export default function RootLayout({
           <div className="relative flex flex-col min-h-screen">
             <Navbar />
             <main className="flex-1">{children}</main>
-            <Footer />
+            <ChatPageFooterSuppressor>
+              <Footer />
+            </ChatPageFooterSuppressor>
           </div>
           <LanguageToggle />
         </LocaleProvider>
       </body>
     </html>
   );
+}
+
+// Server component that conditionally renders Footer based on pathname
+import { headers } from "next/headers";
+
+async function ChatPageFooterSuppressor({ children }: { children: React.ReactNode }) {
+  const headersList = await headers();
+  const pathname = headersList.get("x-pathname") ?? "";
+  // Hide footer on chat pages
+  const isChatPage =
+    pathname === "/chat" ||
+    pathname.startsWith("/chat-home-main-agent-chat-interface");
+  if (isChatPage) return null;
+  return <>{children}</>;
 }
