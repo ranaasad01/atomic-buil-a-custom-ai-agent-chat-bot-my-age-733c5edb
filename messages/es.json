@@ -7,10 +7,10 @@
   "footer": {
     "navigation": "Navegación",
     "poweredBy": "Impulsado por",
-    "copyright": "© 2025 QA Agent AI. Construido con Claude 3.5 Sonnet."
+    "copyright": "© 2025 QA Agent AI. Todos los derechos reservados."
   },
   "hero": {
-    "badge": "Impulsado por Claude 3.5 Sonnet",
+    "badge": "Agente QA con IA",
     "title": "Tu Ingeniero QA con IA",
     "subtitle": "Pega cualquier URL en vivo y obtén scripts de prueba listos para producción en segundos.",
     "cta": "Comenzar Pruebas",

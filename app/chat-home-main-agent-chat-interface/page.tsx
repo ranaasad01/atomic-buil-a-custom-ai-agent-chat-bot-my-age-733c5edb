@@ -18,8 +18,6 @@ import { cn } from "@/lib/utils";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const MODEL_DISPLAY = "Claude 3.5 Sonnet";
-
 const STORAGE_KEYS = {
   API_KEY: "qa_agent_api_key",
   AGENT_PROMPT: "qa_agent_prompt",
@@ -115,7 +113,11 @@ function parseMessageContent(content: string): ContentSegment[] {
     if (match.index > lastIndex) {
       segments.push({ type: "text", content: content.slice(lastIndex, match.index) });
     }
-    segments.push({ type: "code", language: match[1] || "text", content: match[2].trim() });
+    segments.push({
+      type: "code",
+      language: match[1] || "text",
+      content: match[2].trim(),
+    });
     lastIndex = match.index + match[0].length;
   }
 
@@ -123,992 +125,283 @@ function parseMessageContent(content: string): ContentSegment[] {
     segments.push({ type: "text", content: content.slice(lastIndex) });
   }
 
-  return segments;
+  return segments.filter((s) => s.content.trim().length > 0);
 }
 
-function hasTestCaseTable(content: string): boolean {
-  return content.includes("| Test ID") || content.includes("|Test ID") || content.includes("| TC-");
-}
-
-function buildConversationHistory(
-  messages: ChatMessage[]
-): { role: "user" | "assistant"; content: string }[] {
-  return messages.map((m) => ({ role: m.role, content: m.content }));
-}
-
-function getSessionTitle(messages: ChatMessage[], url?: string): string {
-  if (url) {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return url.slice(0, 30);
-    }
-  }
-  const first = messages.find((m) => m.role === "user");
-  if (first) return first.content.slice(0, 40);
-  return "New Session";
-}
-
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function TextRenderer({ text }: { text: string }) {
+function renderTextContent(text: string): React.ReactNode[] {
   const lines = text.split("\n");
-  return (
-    <div className="space-y-1 text-sm leading-relaxed text-[var(--foreground)]">
-      {lines.map((line, i) => {
-        if (line.startsWith("### ")) {
-          return (
-            <p key={i} className="font-semibold text-[var(--accent)] mt-3 mb-1">
-              {line.slice(4)}
-            </p>
-          );
-        }
-        if (line.startsWith("## ")) {
-          return (
-            <p key={i} className="font-bold text-[var(--foreground)] text-base mt-4 mb-2">
-              {line.slice(3)}
-            </p>
-          );
-        }
-        if (line.startsWith("# ")) {
-          return (
-            <p key={i} className="font-bold text-[var(--foreground)] text-lg mt-4 mb-2">
-              {line.slice(2)}
-            </p>
-          );
-        }
-        if (line.startsWith("- ") || line.startsWith("* ")) {
-          return (
-            <p key={i} className="flex gap-2 text-[var(--muted-foreground)]">
-              <span className="text-[var(--accent)] mt-1 shrink-0">•</span>
-              <span>{line.slice(2)}</span>
-            </p>
-          );
-        }
-        if (/^\d+\.\s/.test(line)) {
-          const num = line.match(/^(\d+)\.\s(.*)/);
-          if (num) {
-            return (
-              <p key={i} className="flex gap-2 text-[var(--muted-foreground)]">
-                <span className="text-[var(--primary-light)] font-mono shrink-0">{num[1]}.</span>
-                <span>{num[2]}</span>
-              </p>
-            );
-          }
-        }
-        if (line.startsWith("|")) {
-          return (
-            <p key={i} className="font-mono text-xs text-[var(--muted-foreground)] overflow-x-auto">
-              {line}
-            </p>
-          );
-        }
-        if (line.trim() === "") {
-          return <div key={i} className="h-1" />;
-        }
-        // Inline bold
-        const parts = line.split(/(\*\*[^*]+\*\*)/g);
-        return (
-          <p key={i} className="text-[var(--muted-foreground)]">
-            {parts.map((part, j) =>
-              part.startsWith("**") && part.endsWith("**") ? (
-                <strong key={j} className="text-[var(--foreground)] font-semibold">
-                  {part.slice(2, -2)}
-                </strong>
-              ) : (
-                part
-              )
-            )}
-          </p>
-        );
-      })}
-    </div>
-  );
-}
+  const nodes: React.ReactNode[] = [];
+  let listItems: string[] = [];
+  let listType: "ul" | "ol" | null = null;
 
-function CodeBlock({
-  language,
-  content,
-  onCopy,
-  copiedId,
-  blockId,
-}: {
-  language: string;
-  content: string;
-  onCopy: (id: string, text: string) => void;
-  copiedId: string | null;
-  blockId: string;
-}) {
-  const isCopied = copiedId === blockId;
-
-  const getExtension = () => {
-    if (language === "typescript" || language === "ts") return "ts";
-    if (language === "javascript" || language === "js") return "js";
-    if (language === "python" || language === "py") return "py";
-    return "txt";
+  const flushList = () => {
+    if (listItems.length === 0) return;
+    if (listType === "ul") {
+      nodes.push(
+        <ul key={nodes.length} className="list-disc pl-5 mb-2 space-y-0.5">
+          {listItems.map((item, i) => (
+            <li key={i} className="text-[var(--foreground)]/85 text-sm">{item}</li>
+          ))}
+        </ul>
+      );
+    } else {
+      nodes.push(
+        <ol key={nodes.length} className="list-decimal pl-5 mb-2 space-y-0.5">
+          {listItems.map((item, i) => (
+            <li key={i} className="text-[var(--foreground)]/85 text-sm">{item}</li>
+          ))}
+        </ol>
+      );
+    }
+    listItems = [];
+    listType = null;
   };
 
-  const handleDownload = () => {
+  lines.forEach((line, i) => {
+    const ulMatch = line.match(/^[-*]\s+(.+)/);
+    const olMatch = line.match(/^\d+\.\s+(.+)/);
+    const h2Match = line.match(/^##\s+(.+)/);
+    const h3Match = line.match(/^###\s+(.+)/);
+    const boldMatch = line.match(/^\*\*(.+)\*\*$/);
+
+    if (ulMatch) {
+      if (listType === "ol") flushList();
+      listType = "ul";
+      listItems.push(ulMatch[1]);
+    } else if (olMatch) {
+      if (listType === "ul") flushList();
+      listType = "ol";
+      listItems.push(olMatch[1]);
+    } else {
+      flushList();
+      if (h2Match) {
+        nodes.push(<h2 key={i} className="text-base font-semibold text-[var(--primary-light)] mt-3 mb-1">{h2Match[1]}</h2>);
+      } else if (h3Match) {
+        nodes.push(<h3 key={i} className="text-sm font-semibold text-[var(--accent)] mt-2 mb-1">{h3Match[1]}</h3>);
+      } else if (boldMatch) {
+        nodes.push(<p key={i} className="font-semibold text-[var(--foreground)] text-sm mb-1">{boldMatch[1]}</p>);
+      } else if (line.trim() === "") {
+        nodes.push(<div key={i} className="h-2" />);
+      } else {
+        nodes.push(<p key={i} className="text-[var(--foreground)]/85 text-sm mb-1 leading-relaxed">{line}</p>);
+      }
+    }
+  });
+
+  flushList();
+  return nodes;
+}
+
+// ─── Code Block Component ─────────────────────────────────────────────────────
+
+function CodeBlock({ language, content }: { language: string; content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard not available
+    }
+  }, [content]);
+
+  const handleDownload = useCallback(() => {
+    const ext = language === "python" ? "py" : language === "typescript" ? "ts" : "js";
     const blob = new Blob([content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `test-script.${getExtension()}`;
+    a.download = `test-script.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
-  };
-
-  const langLabel =
-    language === "typescript"
-      ? "TypeScript"
-      : language === "javascript"
-      ? "JavaScript"
-      : language === "python"
-      ? "Python"
-      : language || "Code";
+  }, [content, language]);
 
   return (
-    <div
-      className="rounded-xl overflow-hidden border border-[var(--border)] my-3"
-      style={{ background: "#0d0d1a" }}
-    >
-      {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border)] bg-white/[0.03]">
+    <div className="code-block my-3 rounded-lg overflow-hidden border border-[var(--border)]">
+      <div className="flex items-center justify-between px-4 py-2 bg-[var(--card)] border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
-          <Terminal className="w-3.5 h-3.5 text-[var(--accent)]" />
-          <span className="text-xs font-mono text-[var(--accent)] font-medium">{langLabel}</span>
+          <Code2 className="w-3.5 h-3.5 text-[var(--accent)]" aria-hidden="true" />
+          <span className="text-xs font-mono text-[var(--muted-foreground)] uppercase tracking-wider">
+            {language || "code"}
+          </span>
         </div>
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => onCopy(blockId, content)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/10 transition-all duration-200"
-            aria-label="Copy code"
-          >
-            {isCopied ? (
-              <Check className="w-3.5 h-3.5 text-green-400" />
-            ) : (
-              <Copy className="w-3.5 h-3.5" />
-            )}
-            {isCopied ? "Copied" : "Copy"}
-          </button>
-          <button
             onClick={handleDownload}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/10 transition-all duration-200"
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
             aria-label="Download script"
           >
-            <Download className="w-3.5 h-3.5" />
-            Download
+            <Download className="w-3 h-3" aria-hidden="true" />
+            <span>Download</span>
+          </button>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
+            aria-label={copied ? "Copied" : "Copy code"}
+          >
+            {copied ? (
+              <><Check className="w-3 h-3 text-green-400" aria-hidden="true" /><span className="text-green-400">Copied</span></>
+            ) : (
+              <><Copy className="w-3 h-3" aria-hidden="true" /><span>Copy</span></>
+            )}
           </button>
         </div>
       </div>
-      {/* Code content */}
-      <pre className="overflow-x-auto p-4 text-xs leading-relaxed">
-        <code
-          className="font-mono text-[var(--foreground)]"
-          style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}
-        >
-          {content}
-        </code>
+      <pre className="p-4 overflow-x-auto text-xs leading-relaxed text-[var(--foreground)]/90 font-mono">
+        <code>{content}</code>
       </pre>
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Message Bubble ───────────────────────────────────────────────────────────
 
-export default function ChatInterfacePage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [urlInput, setUrlInput] = useState("");
-  const [selectedFramework, setSelectedFramework] = useState<Framework>("all");
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<AgentStatus>("ready");
-  const [apiKey, setApiKey] = useState("");
-  const [agentPrompt, setAgentPrompt] = useState(DEFAULT_AGENT_PROMPT);
-  const [showEditPrompt, setShowEditPrompt] = useState(false);
-  const [editPromptDraft, setEditPromptDraft] = useState("");
-  const [sessionId, setSessionId] = useState("");
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showFrameworkMenu, setShowFrameworkMenu] = useState(false);
+function MessageBubble({ message }: { message: ChatMessage }) {
+  const isUser = message.role === "user";
+  const segments = isUser ? null : parseMessageContent(message.content);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const frameworkMenuRef = useRef<HTMLDivElement>(null);
-
-  // ── Mount: load from localStorage ──────────────────────────────────────────
-  useEffect(() => {
-    const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
-    if (storedKey) setApiKey(storedKey);
-
-    const storedPrompt = localStorage.getItem(STORAGE_KEYS.AGENT_PROMPT);
-    if (storedPrompt) setAgentPrompt(storedPrompt);
-
-    const storedSessions = localStorage.getItem(STORAGE_KEYS.SESSIONS);
-    if (storedSessions) {
-      try {
-        setSessions(JSON.parse(storedSessions));
-      } catch {
-        setSessions([]);
-      }
-    }
-
-    setSessionId(uid());
-  }, []);
-
-  // ── Auto-scroll ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // ── Close framework menu on outside click ───────────────────────────────────
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (frameworkMenuRef.current && !frameworkMenuRef.current.contains(e.target as Node)) {
-        setShowFrameworkMenu(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // ── Save session ────────────────────────────────────────────────────────────
-  const saveSession = useCallback(
-    (msgs: ChatMessage[]) => {
-      if (msgs.length === 0) return;
-      const session: ChatSession = {
-        id: sessionId,
-        title: getSessionTitle(msgs, urlInput || undefined),
-        url: urlInput || undefined,
-        messages: msgs,
-        createdAt: msgs[0]?.timestamp ?? Date.now(),
-        updatedAt: Date.now(),
-        frameworks: [selectedFramework],
-        agentPromptSnapshot: agentPrompt,
-      };
-      setSessions((prev) => {
-        const filtered = prev.filter((s) => s.id !== sessionId);
-        const updated = [session, ...filtered].slice(0, 50);
-        try {
-          localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(updated));
-        } catch {
-          // storage full — ignore
-        }
-        return updated;
-      });
-    },
-    [sessionId, urlInput, selectedFramework, agentPrompt]
-  );
-
-  // ── Copy to clipboard ───────────────────────────────────────────────────────
-  const handleCopy = useCallback((id: string, text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    });
-  }, []);
-
-  // ── Export Excel ────────────────────────────────────────────────────────────
-  const handleExportExcel = useCallback(
-    async (content: string) => {
-      try {
-        const res = await fetch("/api/export-excel", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, sessionId }),
-        });
-        if (!res.ok) throw new Error("Export failed");
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `test-cases-${sessionId}.xlsx`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } catch {
-        setError("Failed to export Excel. Please try again.");
-      }
-    },
-    [sessionId]
-  );
-
-  // ── New chat ────────────────────────────────────────────────────────────────
-  const handleNewChat = useCallback(() => {
-    setMessages([]);
-    setInput("");
-    setUrlInput("");
-    setError(null);
-    setAgentStatus("ready");
-    setSessionId(uid());
-  }, []);
-
-  // ── Load session ────────────────────────────────────────────────────────────
-  const handleLoadSession = useCallback((session: ChatSession) => {
-    setMessages(session.messages);
-    setUrlInput(session.url ?? "");
-    setSessionId(session.id);
-    setError(null);
-    setAgentStatus("ready");
-  }, []);
-
-  // ── Submit ──────────────────────────────────────────────────────────────────
-  const handleSubmit = useCallback(
-    async (overrideInput?: string) => {
-      const text = overrideInput ?? input;
-      if (!text.trim() && !urlInput.trim()) return;
-      if (isStreaming) return;
-
-      const userContent = [
-        urlInput.trim() ? `URL: ${normalizeUrl(urlInput.trim())}` : "",
-        text.trim(),
-        selectedFramework !== "all"
-          ? `Framework: ${FRAMEWORKS.find((f) => f.value === selectedFramework)?.label ?? selectedFramework}`
-          : "Frameworks: Playwright, Cypress, and Selenium WebDriver",
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const userMsg: ChatMessage = {
-        id: uid(),
-        role: "user",
-        content: userContent,
-        timestamp: Date.now(),
-      };
-
-      const assistantId = uid();
-      const assistantMsg: ChatMessage = {
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-        isStreaming: true,
-      };
-
-      const nextMessages = [...messages, userMsg, assistantMsg];
-      setMessages(nextMessages);
-      setInput("");
-      setError(null);
-      setIsStreaming(true);
-      setAgentStatus("thinking");
-
-      try {
-        const conversationHistory = buildConversationHistory([...messages, userMsg]);
-
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: conversationHistory,
-            systemPrompt: agentPrompt,
-            apiKey: apiKey || undefined,
-          }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: "Request failed" }));
-          throw new Error(errData.error ?? `HTTP ${res.status}`);
-        }
-
-        if (!res.body) throw new Error("No response body");
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulated = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          // Handle SSE format
-          const lines = chunk.split("\n");
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(data);
-                const delta =
-                  parsed.delta?.text ??
-                  parsed.choices?.[0]?.delta?.content ??
-                  parsed.content?.[0]?.text ??
-                  "";
-                if (delta) {
-                  accumulated += delta;
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId
-                        ? { ...m, content: accumulated, isStreaming: true }
-                        : m
-                    )
-                  );
-                }
-              } catch {
-                // Non-JSON line, try raw text
-                if (data && data !== "[DONE]") {
-                  accumulated += data;
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId
-                        ? { ...m, content: accumulated, isStreaming: true }
-                        : m
-                    )
-                  );
-                }
-              }
-            }
-          }
-        }
-
-        const finalMessages = nextMessages.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: accumulated, isStreaming: false }
-            : m
-        );
-        setMessages(finalMessages);
-        setAgentStatus("ready");
-        saveSession(finalMessages);
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : "Unknown error";
-        setError(errMsg);
-        setAgentStatus("error");
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? {
-                  ...m,
-                  content: `I encountered an error: ${errMsg}. Please check your API key in Settings and try again.`,
-                  isStreaming: false,
-                }
-              : m
-          )
-        );
-      } finally {
-        setIsStreaming(false);
-      }
-    },
-    [input, urlInput, messages, isStreaming, agentPrompt, apiKey, selectedFramework, saveSession]
-  );
-
-  // ── Textarea auto-resize ────────────────────────────────────────────────────
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
-    }
-  }, [input]);
-
-  // ── Edit prompt modal ───────────────────────────────────────────────────────
-  const openEditPrompt = () => {
-    setEditPromptDraft(agentPrompt);
-    setShowEditPrompt(true);
-  };
-
-  const saveEditPrompt = () => {
-    setAgentPrompt(editPromptDraft);
-    try {
-      localStorage.setItem(STORAGE_KEYS.AGENT_PROMPT, editPromptDraft);
-    } catch {
-      // ignore
-    }
-    setShowEditPrompt(false);
-  };
-
-  const currentFrameworkLabel =
-    FRAMEWORKS.find((f) => f.value === selectedFramework)?.label ?? "All Frameworks";
-
-  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <>
+    <motion.div
+      variants={fadeInUp}
+      initial="hidden"
+      animate="visible"
+      className={cn(
+        "flex gap-3 group",
+        isUser ? "flex-row-reverse" : "flex-row"
+      )}
+    >
+      {/* Avatar */}
       <div
-        className="flex overflow-hidden"
-        style={{ height: "calc(100vh - 4rem)", background: "var(--background)" }}
+        className={cn(
+          "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5",
+          isUser
+            ? "bg-[var(--primary)]/20 border border-[var(--primary)]/30"
+            : "bg-[var(--accent)]/15 border border-[var(--accent)]/30"
+        )}
       >
-        {/* ── LEFT SIDEBAR ── */}
-        <aside
-          className="hidden md:flex flex-col w-64 shrink-0 border-r border-[var(--border)]"
-          style={{ background: "rgba(26,26,46,0.7)", backdropFilter: "blur(16px)" }}
-        >
-          {/* Sidebar header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-            <span className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-widest">
-              Sessions
-            </span>
-            <button
-              onClick={handleNewChat}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-[var(--foreground)] bg-[var(--primary)]/20 hover:bg-[var(--primary)]/40 border border-[var(--primary)]/30 transition-all duration-200"
-              aria-label="New chat"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New
-            </button>
-          </div>
-
-          {/* Session list */}
-          <div className="flex-1 overflow-y-auto py-2">
-            {sessions.length === 0 ? (
-              <div className="px-4 py-8 text-center">
-                <Clock className="w-6 h-6 text-[var(--muted-foreground)] mx-auto mb-2 opacity-50" />
-                <p className="text-xs text-[var(--muted-foreground)] opacity-60">
-                  No sessions yet
-                </p>
-              </div>
-            ) : (
-              sessions.map((session) => (
-                <button
-                  key={session.id}
-                  onClick={() => handleLoadSession(session)}
-                  className={cn(
-                    "w-full text-left px-4 py-3 border-b border-[var(--border)]/50 hover:bg-white/5 transition-all duration-200 group",
-                    session.id === sessionId && "bg-[var(--primary)]/10 border-l-2 border-l-[var(--primary)]"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span
-                      className={cn(
-                        "text-xs font-medium truncate",
-                        session.id === sessionId
-                          ? "text-[var(--foreground)]"
-                          : "text-[var(--muted-foreground)] group-hover:text-[var(--foreground)]"
-                      )}
-                    >
-                      {session.title}
-                    </span>
-                    <span className="text-[10px] text-[var(--muted-foreground)] shrink-0">
-                      {formatRelativeTime(session.updatedAt)}
-                    </span>
-                  </div>
-                  {session.frameworks && session.frameworks.length > 0 && (
-                    <div className="flex gap-1 mt-1.5 flex-wrap">
-                      {session.frameworks.slice(0, 2).map((fw) => (
-                        <span
-                          key={fw}
-                          className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)] font-mono"
-                        >
-                          {fw}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-
-          {/* Sidebar footer */}
-          <div className="p-3 border-t border-[var(--border)]">
-            <button
-              onClick={openEditPrompt}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 border border-[var(--border)] transition-all duration-200"
-            >
-              <Edit3 className="w-3.5 h-3.5 text-[var(--primary-light)]" />
-              Edit Agent Prompt
-            </button>
-          </div>
-        </aside>
-
-        {/* ── MAIN AREA ── */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Top bar */}
-          <div
-            className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--border)] shrink-0"
-            style={{ background: "rgba(26,26,46,0.7)", backdropFilter: "blur(16px)" }}
-          >
-            {/* Left: Agent identity */}
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="w-7 h-7 rounded-lg bg-[var(--primary)] flex items-center justify-center">
-                <Bot className="w-4 h-4 text-white" />
-              </div>
-              <div className="hidden sm:flex flex-col leading-none">
-                <span className="text-xs font-semibold text-[var(--foreground)]">QA Agent</span>
-                <span className="text-[10px] font-mono text-[var(--accent)]">{MODEL_DISPLAY}</span>
-              </div>
-            </div>
-
-            {/* Center: URL input */}
-            <div className="flex-1 max-w-sm">
-              <div className="relative">
-                <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--muted-foreground)]" />
-                <input
-                  type="url"
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="https://example.com"
-                  className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs bg-white/5 border border-[var(--border)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--accent)] transition-colors duration-200"
-                />
-              </div>
-            </div>
-
-            {/* Right: Framework selector + status */}
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Framework dropdown */}
-              <div className="relative" ref={frameworkMenuRef}>
-                <button
-                  onClick={() => setShowFrameworkMenu((v) => !v)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-white/5 border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/50 transition-all duration-200"
-                >
-                  <Code2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{currentFrameworkLabel}</span>
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-                <AnimatePresence>
-                  {showFrameworkMenu && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute right-0 top-full mt-1.5 w-48 rounded-xl border border-[var(--border)] overflow-hidden z-50"
-                      style={{ background: "rgba(26,26,46,0.98)", backdropFilter: "blur(16px)" }}
-                    >
-                      {FRAMEWORKS.map((fw) => (
-                        <button
-                          key={fw.value}
-                          onClick={() => {
-                            setSelectedFramework(fw.value);
-                            setShowFrameworkMenu(false);
-                          }}
-                          className={cn(
-                            "w-full text-left px-3 py-2 text-xs transition-colors duration-150",
-                            selectedFramework === fw.value
-                              ? "text-[var(--accent)] bg-[var(--accent)]/10"
-                              : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"
-                          )}
-                        >
-                          {fw.label}
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-
-              {/* Status badge */}
-              <div
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border",
-                  agentStatus === "ready" &&
-                    "bg-green-500/10 border-green-500/30 text-green-400",
-                  agentStatus === "thinking" &&
-                    "bg-[var(--accent)]/10 border-[var(--accent)]/30 text-[var(--accent)]",
-                  agentStatus === "error" &&
-                    "bg-red-500/10 border-red-500/30 text-red-400"
-                )}
-              >
-                {agentStatus === "thinking" ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : agentStatus === "error" ? (
-                  <AlertCircle className="w-3 h-3" />
-                ) : (
-                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                )}
-                <span className="hidden sm:inline">
-                  {agentStatus === "ready"
-                    ? "Ready"
-                    : agentStatus === "thinking"
-                    ? "Thinking"
-                    : "Error"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Messages area */}
-          <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-            {messages.length === 0 ? (
-              <motion.div
-                variants={fadeInUp}
-                initial="hidden"
-                animate="visible"
-                className="flex flex-col items-center justify-center h-full text-center gap-6 py-16"
-              >
-                <div className="w-16 h-16 rounded-2xl bg-[var(--primary)]/20 border border-[var(--primary)]/30 flex items-center justify-center">
-                  <Sparkles className="w-8 h-8 text-[var(--primary-light)]" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-[var(--foreground)] mb-2">
-                    Start by entering a URL above
-                  </h2>
-                  <p className="text-sm text-[var(--muted-foreground)] max-w-sm">
-                    Paste any live website URL and describe what you want to test. The agent will
-                    analyze, generate scripts, and export test cases.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-                  {EXAMPLE_PROMPTS.map((prompt) => (
-                    <button
-                      key={prompt}
-                      onClick={() => setInput(prompt)}
-                      className="px-3 py-1.5 rounded-full text-xs bg-white/5 border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/50 hover:bg-[var(--primary)]/10 transition-all duration-200"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            ) : (
-              <AnimatePresence initial={false}>
-                {messages.map((msg) => (
-                  <motion.div
-                    key={msg.id}
-                    variants={fadeInUp}
-                    initial="hidden"
-                    animate="visible"
-                    className={cn(
-                      "flex gap-3",
-                      msg.role === "user" ? "justify-end" : "justify-start"
-                    )}
-                  >
-                    {/* Assistant avatar */}
-                    {msg.role === "assistant" && (
-                      <div className="w-7 h-7 rounded-lg bg-[var(--primary)] flex items-center justify-center shrink-0 mt-1">
-                        <Bot className="w-4 h-4 text-white" />
-                      </div>
-                    )}
-
-                    {/* Message bubble */}
-                    <div
-                      className={cn(
-                        "flex flex-col gap-2",
-                        msg.role === "user" ? "max-w-[75%] items-end" : "max-w-[85%] items-start"
-                      )}
-                    >
-                      {msg.role === "assistant" && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-[var(--foreground)]">
-                            QA Agent
-                          </span>
-                          <span className="text-[10px] font-mono text-[var(--accent)]">
-                            {MODEL_DISPLAY}
-                          </span>
-                          <span className="text-[10px] text-[var(--muted-foreground)]">
-                            {formatTime(msg.timestamp)}
-                          </span>
-                        </div>
-                      )}
-
-                      <div
-                        className={cn(
-                          msg.role === "user"
-                            ? "bg-[var(--primary)]/20 border border-[var(--primary)]/30 rounded-2xl rounded-tr-sm px-4 py-3"
-                            : "glass rounded-2xl rounded-tl-sm px-4 py-4"
-                        )}
-                      >
-                        {msg.role === "user" ? (
-                          <p className="text-sm text-[var(--foreground)] whitespace-pre-wrap">
-                            {msg.content}
-                          </p>
-                        ) : (
-                          <div>
-                            {parseMessageContent(msg.content).map((seg, idx) =>
-                              seg.type === "code" ? (
-                                <CodeBlock
-                                  key={idx}
-                                  language={seg.language ?? "text"}
-                                  content={seg.content}
-                                  onCopy={handleCopy}
-                                  copiedId={copiedId}
-                                  blockId={`${msg.id}-${idx}`}
-                                />
-                              ) : (
-                                <TextRenderer key={idx} text={seg.content} />
-                              )
-                            )}
-                            {msg.isStreaming && (
-                              <span className="streaming-cursor" aria-hidden="true" />
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Assistant footer actions */}
-                      {msg.role === "assistant" && !msg.isStreaming && msg.content && (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button
-                            onClick={() => handleCopy(`all-${msg.id}`, msg.content)}
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] bg-white/5 hover:bg-white/10 border border-[var(--border)] transition-all duration-200"
-                          >
-                            {copiedId === `all-${msg.id}` ? (
-                              <Check className="w-3 h-3 text-green-400" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                            {copiedId === `all-${msg.id}` ? "Copied" : "Copy All"}
-                          </button>
-                          {hasTestCaseTable(msg.content) && (
-                            <button
-                              onClick={() => handleExportExcel(msg.content)}
-                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-[var(--accent)] bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 border border-[var(--accent)]/30 transition-all duration-200"
-                            >
-                              <FileText className="w-3 h-3" />
-                              Export Excel
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* User timestamp */}
-                      {msg.role === "user" && (
-                        <span className="text-[10px] text-[var(--muted-foreground)]">
-                          {formatTime(msg.timestamp)}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* User avatar */}
-                    {msg.role === "user" && (
-                      <div className="w-7 h-7 rounded-lg bg-[var(--primary)]/30 border border-[var(--primary)]/40 flex items-center justify-center shrink-0 mt-1">
-                        <User className="w-4 h-4 text-[var(--primary-light)]" />
-                      </div>
-                    )}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input area */}
-          <div
-            className="shrink-0 border-t border-[var(--border)] px-4 py-4"
-            style={{ background: "rgba(26,26,46,0.85)", backdropFilter: "blur(16px)" }}
-          >
-            {/* Error banner */}
-            <AnimatePresence>
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  className="flex items-center gap-2 px-3 py-2 mb-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs"
-                >
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  <span className="flex-1">{error}</span>
-                  <button
-                    onClick={() => setError(null)}
-                    className="hover:text-red-300 transition-colors"
-                    aria-label="Dismiss error"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Textarea */}
-            <div className="flex gap-3 items-end">
-              <div className="flex-1 relative">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                      e.preventDefault();
-                      handleSubmit();
-                    }
-                  }}
-                  placeholder="Describe what to test... (e.g. Test the login flow and export test cases to Excel)"
-                  rows={2}
-                  disabled={isStreaming}
-                  className="w-full px-4 py-3 rounded-xl text-sm bg-white/5 border border-[var(--border)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]/60 resize-none transition-colors duration-200 disabled:opacity-50"
-                  style={{ minHeight: "60px", maxHeight: "160px" }}
-                />
-                <span className="absolute bottom-2 right-3 text-[10px] text-[var(--muted-foreground)] opacity-50">
-                  Ctrl+Enter
-                </span>
-              </div>
-
-              {/* Send button */}
-              <button
-                onClick={() => handleSubmit()}
-                disabled={isStreaming || (!input.trim() && !urlInput.trim())}
-                className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium bg-[var(--primary)] hover:bg-[var(--primary)]/80 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shrink-0"
-                aria-label="Send message"
-              >
-                {isStreaming ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
-                <span className="hidden sm:inline">{isStreaming ? "Thinking" : "Send"}</span>
-              </button>
-            </div>
-
-            {/* Framework pills */}
-            <div className="flex items-center gap-2 mt-2 flex-wrap">
-              {FRAMEWORKS.map((fw) => (
-                <button
-                  key={fw.value}
-                  onClick={() => setSelectedFramework(fw.value)}
-                  className={cn(
-                    "px-2.5 py-1 rounded-full text-[10px] font-mono border transition-all duration-200",
-                    selectedFramework === fw.value
-                      ? "bg-[var(--accent)]/20 border-[var(--accent)]/50 text-[var(--accent)]"
-                      : "bg-white/5 border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--accent)]/30 hover:text-[var(--foreground)]"
-                  )}
-                >
-                  {fw.label}
-                </button>
-              ))}
-              <span className="text-[10px] text-[var(--muted-foreground)] ml-auto">
-                {messages.length > 0 && `${Math.floor(messages.length / 2)} exchange${messages.length > 2 ? "s" : ""}`}
-              </span>
-            </div>
-          </div>
-        </div>
+        {isUser ? (
+          <User className="w-4 h-4 text-[var(--primary-light)]" aria-hidden="true" />
+        ) : (
+          <Bot className="w-4 h-4 text-[var(--accent)]" aria-hidden="true" />
+        )}
       </div>
 
-      {/* ── EDIT AGENT PROMPT MODAL ── */}
-      <AnimatePresence>
-        {showEditPrompt && (
+      {/* Bubble */}
+      <div
+        className={cn(
+          "max-w-[80%] rounded-2xl px-4 py-3",
+          isUser
+            ? "bg-[var(--primary)]/20 border border-[var(--primary)]/25 text-[var(--foreground)] text-sm"
+            : "glass border border-[var(--border)] text-[var(--foreground)]"
+        )}
+      >
+        {isUser ? (
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          <div className="prose-dark">
+            {segments?.map((seg, i) =>
+              seg.type === "code" ? (
+                <CodeBlock key={i} language={seg.language ?? ""} content={seg.content} />
+              ) : (
+                <div key={i}>{renderTextContent(seg.content)}</div>
+              )
+            )}
+            {message.isStreaming && <span className="streaming-cursor" aria-hidden="true" />}
+          </div>
+        )}
+        <div
+          className={cn(
+            "text-[10px] mt-1.5",
+            isUser ? "text-right text-[var(--muted-foreground)]/60" : "text-[var(--muted-foreground)]/60"
+          )}
+        >
+          {formatTime(message.timestamp)}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Edit Agent Modal ─────────────────────────────────────────────────────────
+
+function EditAgentModal({
+  isOpen,
+  onClose,
+  prompt,
+  onSave,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  prompt: string;
+  onSave: (p: string) => void;
+}) {
+  const [draft, setDraft] = useState(prompt);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) setDraft(prompt);
+  }, [isOpen, prompt]);
+
+  const handleSave = () => {
+    onSave(draft);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 1000);
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
           <motion.div
             variants={modalOverlay}
             initial="hidden"
             animate="visible"
             exit="hidden"
-            className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-16 pb-8 overflow-y-auto"
-            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setShowEditPrompt(false);
-            }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+            onClick={onClose}
+          />
+          <motion.div
+            variants={modalContent}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
-            <motion.div
-              variants={modalContent}
-              initial="hidden"
-              animate="visible"
-              exit="hidden"
-              className="glass w-full max-w-2xl rounded-2xl p-6 border border-[var(--border)]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal header */}
-              <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-2">
-                  <Edit3 className="w-4 h-4 text-[var(--primary-light)]" />
-                  <h2 className="text-base font-semibold text-[var(--foreground)]">
-                    Edit Agent Prompt
-                  </h2>
+            <div className="glass rounded-2xl border border-[var(--border)] w-full max-w-2xl pointer-events-auto shadow-[0_8px_40px_rgba(124,58,237,0.2)]">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/20 flex items-center justify-center">
+                    <Edit3 className="w-4 h-4 text-[var(--primary-light)]" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-[var(--foreground)]">Edit Agent Instructions</h2>
+                    <p className="text-xs text-[var(--muted-foreground)]">Customize how the QA Agent behaves</p>
+                  </div>
                 </div>
                 <button
-                  onClick={() => setShowEditPrompt(false)}
-                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/10 transition-all duration-200"
+                  onClick={onClose}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
                   aria-label="Close modal"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
 
-              {/* Preset buttons */}
-              <div className="mb-4">
-                <p className="text-xs text-[var(--muted-foreground)] mb-2 font-medium uppercase tracking-wider">
-                  Quick Presets
-                </p>
+              {/* Presets */}
+              <div className="px-6 pt-4">
+                <p className="text-xs text-[var(--muted-foreground)] mb-2 font-medium uppercase tracking-wider">Quick Presets</p>
                 <div className="flex flex-wrap gap-2">
                   {PROMPT_PRESETS.map((preset) => (
                     <button
                       key={preset.id}
-                      onClick={() => setEditPromptDraft(preset.prompt)}
-                      className="px-3 py-1.5 rounded-lg text-xs border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/50 hover:bg-[var(--primary)]/10 transition-all duration-200"
+                      onClick={() => setDraft(preset.prompt)}
+                      className="px-3 py-1 rounded-full text-xs border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--accent)] hover:border-[var(--accent)]/40 transition-all duration-200"
                     >
                       {preset.label}
                     </button>
@@ -1117,38 +410,638 @@ export default function ChatInterfacePage() {
               </div>
 
               {/* Textarea */}
-              <textarea
-                value={editPromptDraft}
-                onChange={(e) => setEditPromptDraft(e.target.value)}
-                className="w-full h-64 px-4 py-3 rounded-xl text-xs font-mono bg-white/5 border border-[var(--border)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]/60 resize-none transition-colors duration-200"
-                placeholder="Enter your custom agent instructions..."
-                style={{ fontFamily: "'JetBrains Mono', monospace" }}
-              />
-
-              {/* Modal footer */}
-              <div className="flex items-center justify-between mt-4">
-                <span className="text-[10px] text-[var(--muted-foreground)] font-mono">
-                  {editPromptDraft.length.toLocaleString("en-US")} characters
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setEditPromptDraft(DEFAULT_AGENT_PROMPT)}
-                    className="px-3 py-1.5 rounded-lg text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] bg-white/5 hover:bg-white/10 border border-[var(--border)] transition-all duration-200"
-                  >
-                    Reset to Default
-                  </button>
-                  <button
-                    onClick={saveEditPrompt}
-                    className="px-4 py-1.5 rounded-lg text-xs font-medium bg-[var(--primary)] hover:bg-[var(--primary)]/80 text-white transition-all duration-200"
-                  >
-                    Save
-                  </button>
-                </div>
+              <div className="px-6 py-4">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  rows={12}
+                  className="w-full bg-[var(--background)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm text-[var(--foreground)] font-mono placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]/60 resize-none transition-colors duration-200"
+                  placeholder="Enter agent system prompt..."
+                  aria-label="Agent system prompt"
+                />
+                <p className="text-xs text-[var(--muted-foreground)] mt-1.5">
+                  {draft.length} characters
+                </p>
               </div>
-            </motion.div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border)]">
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-lg text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[var(--primary)] hover:bg-[var(--primary)]/80 text-white transition-all duration-200"
+                >
+                  {saved ? (
+                    <><Check className="w-4 h-4" aria-hidden="true" />Saved!</>
+                  ) : (
+                    <><Check className="w-4 h-4" aria-hidden="true" />Save Instructions</>
+                  )}
+                </button>
+              </div>
+            </div>
           </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// ─── Session Sidebar Item ─────────────────────────────────────────────────────
+
+function SessionItem({
+  session,
+  isActive,
+  onSelect,
+  onDelete,
+}: {
+  session: ChatSession;
+  isActive: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "group flex items-start gap-2.5 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200",
+        isActive
+          ? "bg-[var(--primary)]/15 border border-[var(--primary)]/25"
+          : "hover:bg-white/5 border border-transparent"
+      )}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && onSelect()}
+      aria-label={`Session: ${session.title}`}
+      aria-current={isActive ? "true" : undefined}
+    >
+      <div className="w-6 h-6 rounded-md bg-[var(--accent)]/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Globe className="w-3 h-3 text-[var(--accent)]" aria-hidden="true" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-[var(--foreground)] truncate">{session.title}</p>
+        <p className="text-[10px] text-[var(--muted-foreground)] mt-0.5">
+          {formatRelativeTime(session.updatedAt)} · {session.messages.length} msgs
+        </p>
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded flex items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--destructive)] transition-all duration-200"
+        aria-label="Delete session"
+      >
+        <Trash2 className="w-3 h-3" aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function ChatPage() {
+  // ── State ──
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [urlInput, setUrlInput] = useState("");
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>("ready");
+  const [selectedFrameworks, setSelectedFrameworks] = useState<Framework[]>(["playwright"]);
+  const [agentPrompt, setAgentPrompt] = useState(DEFAULT_AGENT_PROMPT);
+  const [apiKey, setApiKey] = useState("");
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ── Active session ──
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+  const messages = activeSession?.messages ?? [];
+
+  // ── Mount / hydration guard ──
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const storedSessions = localStorage.getItem(STORAGE_KEYS.SESSIONS);
+      if (storedSessions) setSessions(JSON.parse(storedSessions));
+      const storedPrompt = localStorage.getItem(STORAGE_KEYS.AGENT_PROMPT);
+      if (storedPrompt) setAgentPrompt(storedPrompt);
+      const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
+      if (storedKey) setApiKey(storedKey);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // ── Persist sessions ──
+  useEffect(() => {
+    if (!mounted) return;
+    try {
+      localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions));
+    } catch {
+      // ignore
+    }
+  }, [sessions, mounted]);
+
+  // ── Auto-scroll ──
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // ── Session helpers ──
+  const createSession = useCallback((firstMessage?: string, url?: string): ChatSession => {
+    const now = Date.now();
+    return {
+      id: uid(),
+      title: url ? new URL(url.startsWith("http") ? url : `https://${url}`).hostname : (firstMessage?.slice(0, 40) ?? "New Session"),
+      url,
+      messages: [],
+      createdAt: now,
+      updatedAt: now,
+      frameworks: selectedFrameworks,
+    };
+  }, [selectedFrameworks]);
+
+  const updateSession = useCallback((id: string, updater: (s: ChatSession) => ChatSession) => {
+    setSessions((prev) => prev.map((s) => s.id === id ? updater(s) : s));
+  }, []);
+
+  const addMessage = useCallback((sessionId: string, msg: ChatMessage) => {
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === sessionId
+          ? { ...s, messages: [...s.messages, msg], updatedAt: Date.now() }
+          : s
+      )
+    );
+  }, []);
+
+  const updateLastMessage = useCallback((sessionId: string, updater: (m: ChatMessage) => ChatMessage) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        const msgs = [...s.messages];
+        if (msgs.length === 0) return s;
+        msgs[msgs.length - 1] = updater(msgs[msgs.length - 1]);
+        return { ...s, messages: msgs, updatedAt: Date.now() };
+      })
+    );
+  }, []);
+
+  const handleNewSession = useCallback(() => {
+    setActiveSessionId(null);
+    setInput("");
+    setUrlInput("");
+    setErrorMsg("");
+  }, []);
+
+  const handleDeleteSession = useCallback((id: string) => {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSessionId === id) setActiveSessionId(null);
+  }, [activeSessionId]);
+
+  // ── Framework toggle ──
+  const toggleFramework = useCallback((fw: Framework) => {
+    setSelectedFrameworks((prev) => {
+      if (fw === "all") return ["all"];
+      const without = prev.filter((f) => f !== "all" && f !== fw);
+      return prev.includes(fw) && prev.length > 1 ? without : [...without.filter((f) => f !== fw), fw];
+    });
+  }, []);
+
+  // ── Save agent prompt ──
+  const handleSavePrompt = useCallback((p: string) => {
+    setAgentPrompt(p);
+    try {
+      localStorage.setItem(STORAGE_KEYS.AGENT_PROMPT, p);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // ── Excel export ──
+  const handleExportExcel = useCallback(async () => {
+    if (messages.length === 0) return;
+    try {
+      const XLSX = await import("xlsx");
+      const testCases = [
+        ["Test ID", "Test Suite", "Description", "Preconditions", "Steps", "Expected Result", "Actual Result", "Status", "Priority", "Assigned To"],
+        ["TC-001", "Smoke", "Verify page loads", "Browser open", "1. Navigate to URL", "Page loads with 200 OK", "", "Pending", "High", ""],
+        ["TC-002", "Functional", "Verify navigation links", "Page loaded", "1. Click each nav link", "Each link navigates correctly", "", "Pending", "Medium", ""],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(testCases);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Test Cases");
+      XLSX.writeFile(wb, `test-cases-${Date.now()}.xlsx`);
+    } catch {
+      setErrorMsg("Failed to export Excel. Please try again.");
+    }
+  }, [messages]);
+
+  // ── Send message ──
+  const handleSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text || agentStatus === "thinking") return;
+
+    setErrorMsg("");
+
+    // Resolve or create session
+    let sessionId = activeSessionId;
+    let url = urlInput.trim() ? normalizeUrl(urlInput.trim()) : activeSession?.url;
+
+    if (!sessionId) {
+      const newSession = createSession(text, url);
+      setSessions((prev) => [newSession, ...prev]);
+      setActiveSessionId(newSession.id);
+      sessionId = newSession.id;
+    }
+
+    // Build user message
+    const userMsg: ChatMessage = {
+      id: uid(),
+      role: "user",
+      content: url && !activeSession ? `URL: ${url}\n\n${text}` : text,
+      timestamp: Date.now(),
+    };
+
+    addMessage(sessionId, userMsg);
+    setInput("");
+    setAgentStatus("thinking");
+
+    // Build assistant placeholder
+    const assistantMsg: ChatMessage = {
+      id: uid(),
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      isStreaming: true,
+    };
+    addMessage(sessionId, assistantMsg);
+
+    // Build API messages
+    const currentSession = sessions.find((s) => s.id === sessionId);
+    const apiMessages = [
+      ...(currentSession?.messages ?? []).map((m) => ({ role: m.role, content: m.content })),
+      { role: "user" as const, content: userMsg.content },
+    ];
+
+    // Build system prompt with framework context
+    const frameworkContext = selectedFrameworks.includes("all")
+      ? "Generate scripts for Playwright (TypeScript), Cypress (JavaScript), and Selenium (Python)."
+      : `Generate scripts for: ${selectedFrameworks.join(", ")}.`;
+
+    const systemPrompt = `${agentPrompt}\n\nFramework preference: ${frameworkContext}`;
+
+    try {
+      abortRef.current = new AbortController();
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: apiMessages,
+          systemPrompt,
+          apiKey: apiKey || undefined,
+        }),
+        signal: abortRef.current.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        throw new Error(err.error ?? `HTTP ${res.status}`);
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        const finalAccumulated = accumulated;
+        updateLastMessage(sessionId, (m) => ({ ...m, content: finalAccumulated, isStreaming: true }));
+      }
+
+      updateLastMessage(sessionId, (m) => ({ ...m, isStreaming: false }));
+      setAgentStatus("ready");
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        updateLastMessage(sessionId, (m) => ({ ...m, isStreaming: false }));
+        setAgentStatus("ready");
+        return;
+      }
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setErrorMsg(message);
+      updateLastMessage(sessionId, (m) => ({
+        ...m,
+        content: `Error: ${message}`,
+        isStreaming: false,
+      }));
+      setAgentStatus("error");
+      setTimeout(() => setAgentStatus("ready"), 3000);
+    }
+  }, [input, agentStatus, activeSessionId, urlInput, activeSession, createSession, addMessage, sessions, selectedFrameworks, agentPrompt, apiKey, updateLastMessage]);
+
+  // ── Keyboard submit ──
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [handleSend]
+  );
+
+  // ── Status indicator ──
+  const statusConfig = {
+    ready: { color: "bg-green-400", label: "Ready" },
+    thinking: { color: "bg-[var(--accent)]", label: "Analyzing..." },
+    error: { color: "bg-[var(--destructive)]", label: "Error" },
+  }[agentStatus];
+
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+        <Loader2 className="w-6 h-6 text-[var(--accent)] animate-spin" aria-label="Loading" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+      {/* ── Sidebar ── */}
+      <AnimatePresence initial={false}>
+        {sidebarOpen && (
+          <motion.aside
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 260, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="flex-shrink-0 glass border-r border-[var(--border)] flex flex-col overflow-hidden"
+            aria-label="Session sidebar"
+          >
+            {/* Sidebar header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+              <span className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider">Sessions</span>
+              <button
+                onClick={handleNewSession}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-all duration-200"
+                aria-label="New session"
+              >
+                <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                New
+              </button>
+            </div>
+
+            {/* Session list */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {sessions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 text-center px-4">
+                  <Clock className="w-6 h-6 text-[var(--muted-foreground)]/40 mb-2" aria-hidden="true" />
+                  <p className="text-xs text-[var(--muted-foreground)]/60">No sessions yet</p>
+                </div>
+              ) : (
+                sessions.map((session) => (
+                  <SessionItem
+                    key={session.id}
+                    session={session}
+                    isActive={session.id === activeSessionId}
+                    onSelect={() => setActiveSessionId(session.id)}
+                    onDelete={() => handleDeleteSession(session.id)}
+                  />
+                ))
+              )}
+            </div>
+
+            {/* Sidebar footer */}
+            <div className="px-4 py-3 border-t border-[var(--border)]">
+              <Link
+                href="/history"
+                className="flex items-center gap-2 text-xs text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors duration-200"
+              >
+                <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                View all history
+              </Link>
+            </div>
+          </motion.aside>
         )}
       </AnimatePresence>
-    </>
+
+      {/* ── Main chat area ── */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Chat header */}
+        <div className="flex items-center justify-between px-4 py-3 glass border-b border-[var(--border)] flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen((v) => !v)}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
+              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            >
+              <ChevronDown
+                className={cn("w-4 h-4 transition-transform duration-200", sidebarOpen ? "-rotate-90" : "rotate-90")}
+                aria-hidden="true"
+              />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-[var(--accent)]/15 flex items-center justify-center">
+                <Bot className="w-4 h-4 text-[var(--accent)]" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[var(--foreground)] leading-none">QA Agent</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span
+                    className={cn("w-1.5 h-1.5 rounded-full", statusConfig.color,
+                      agentStatus === "thinking" && "pulse-ring"
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span className="text-[10px] text-[var(--muted-foreground)]">{statusConfig.label}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Framework selector */}
+            <div className="hidden sm:flex items-center gap-1">
+              {FRAMEWORKS.map((fw) => (
+                <button
+                  key={fw.value}
+                  onClick={() => toggleFramework(fw.value)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all duration-200",
+                    selectedFrameworks.includes(fw.value)
+                      ? "border-[var(--accent)]/50 text-[var(--accent)] bg-[var(--accent)]/10"
+                      : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--border)]/80"
+                  )}
+                  aria-pressed={selectedFrameworks.includes(fw.value)}
+                  aria-label={`Toggle ${fw.label}`}
+                >
+                  {fw.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Edit agent */}
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--primary-light)] hover:border-[var(--primary)]/40 transition-all duration-200"
+              aria-label="Edit agent instructions"
+            >
+              <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
+              Edit Agent
+            </button>
+
+            {/* Export Excel */}
+            {messages.length > 0 && (
+              <button
+                onClick={handleExportExcel}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--accent)] hover:border-[var(--accent)]/40 transition-all duration-200"
+                aria-label="Export test cases to Excel"
+              >
+                <FileText className="w-3.5 h-3.5" aria-hidden="true" />
+                Export Excel
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* URL bar */}
+        <div className="px-4 py-2.5 border-b border-[var(--border)] bg-[var(--background)]/50 flex-shrink-0">
+          <div className="flex items-center gap-2 max-w-2xl">
+            <Globe className="w-4 h-4 text-[var(--muted-foreground)] flex-shrink-0" aria-hidden="true" />
+            <input
+              type="url"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="https://example.com — paste a URL to analyze"
+              className="flex-1 bg-transparent text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:outline-none"
+              aria-label="Website URL to test"
+            />
+            {urlInput && isValidUrl(urlInput) && (
+              <span className="text-[10px] text-green-400 font-medium">Valid URL</span>
+            )}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+          {messages.length === 0 ? (
+            <motion.div
+              variants={fadeInUp}
+              initial="hidden"
+              animate="visible"
+              className="flex flex-col items-center justify-center h-full text-center px-4"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center mb-4">
+                <Sparkles className="w-8 h-8 text-[var(--accent)]" aria-hidden="true" />
+              </div>
+              <h2 className="text-lg font-semibold text-[var(--foreground)] mb-2">QA Agent Ready</h2>
+              <p className="text-sm text-[var(--muted-foreground)] max-w-md mb-6">
+                Paste a website URL above, then describe what you want to test. The agent will analyze the site and generate test scripts.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
+                {EXAMPLE_PROMPTS.map((prompt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setInput(prompt)}
+                    className="text-left px-3 py-2.5 rounded-xl border border-[var(--border)] text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--accent)]/30 hover:bg-[var(--accent)]/5 transition-all duration-200"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          ) : (
+            messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))
+          )}
+
+          {/* Error banner */}
+          <AnimatePresence>
+            {errorMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-[var(--destructive)]/10 border border-[var(--destructive)]/25"
+                role="alert"
+              >
+                <AlertCircle className="w-4 h-4 text-[var(--destructive)] flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-[var(--destructive)]">Error</p>
+                  <p className="text-xs text-[var(--foreground)]/70 mt-0.5">{errorMsg}</p>
+                </div>
+                <button
+                  onClick={() => setErrorMsg("")}
+                  className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+                  aria-label="Dismiss error"
+                >
+                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input area */}
+        <div className="flex-shrink-0 px-4 py-3 border-t border-[var(--border)] glass">
+          <div className="flex items-end gap-3 max-w-4xl mx-auto">
+            <div className="flex-1 relative">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Describe what to test, or ask for specific scripts..."
+                rows={1}
+                className="w-full bg-[var(--card)] border border-[var(--border)] rounded-xl px-4 py-3 pr-12 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:outline-none focus:border-[var(--primary)]/50 resize-none transition-colors duration-200 leading-relaxed"
+                style={{ minHeight: "48px", maxHeight: "160px" }}
+                aria-label="Chat input"
+                disabled={agentStatus === "thinking"}
+              />
+            </div>
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || agentStatus === "thinking"}
+              className={cn(
+                "flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-200",
+                input.trim() && agentStatus !== "thinking"
+                  ? "bg-[var(--primary)] hover:bg-[var(--primary)]/80 text-white glow-primary"
+                  : "bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"
+              )}
+              aria-label="Send message"
+            >
+              {agentStatus === "thinking" ? (
+                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Send className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+          <p className="text-center text-[10px] text-[var(--muted-foreground)]/40 mt-2">
+            Press Enter to send · Shift+Enter for new line
+          </p>
+        </div>
+      </div>
+
+      {/* ── Edit Agent Modal ── */}
+      <EditAgentModal
+        isOpen={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        prompt={agentPrompt}
+        onSave={handleSavePrompt}
+      />
+    </div>
   );
 }

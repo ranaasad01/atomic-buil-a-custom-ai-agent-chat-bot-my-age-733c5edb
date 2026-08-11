@@ -7,8 +7,6 @@ import { Reveal } from "@/components/Reveal";
 import { staggerContainer, fadeInUp, scaleIn } from "@/lib/motion";
 import { APP_NAME, APP_TAGLINE, FRAMEWORKS } from "@/lib/data";
 
-const MODEL_DISPLAY = "Claude 3.5 Sonnet";
-
 // ─── Hero animation variants ─────────────────────────────────────────────────
 
 const heroVariants: Variants = {
@@ -111,237 +109,149 @@ const HOW_IT_WORKS = [
   },
 ];
 
-const PLAYWRIGHT_SNIPPET = `import { test, expect } from '@playwright/test';
+const STATS = [
+  { value: "3", label: "Frameworks Supported", icon: Terminal },
+  { value: "100+", label: "Test Patterns", icon: CheckCircle },
+  { value: "<30s", label: "Time to First Script", icon: Zap },
+  { value: "WCAG", label: "Accessibility Checks", icon: Shield },
+];
 
-test.describe('Homepage — Smoke Suite', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('https://example.com');
-  });
-
-  test('page loads with correct title', async ({ page }) => {
-    await expect(page).toHaveTitle(/.+/);
-  });
-
-  test('primary CTA is visible and clickable', async ({ page }) => {
-    const cta = page.locator('[data-testid="cta"]');
-    await expect(cta).toBeVisible();
-    await cta.click();
-  });
-
-  test('no console errors on load', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', msg => {
-      if (msg.type() === 'error') errors.push(msg.text());
-    });
-    await page.reload();
-    expect(errors).toHaveLength(0);
-  });
-});`;
-
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
-  const displayFrameworks = FRAMEWORKS.filter((f) => f.value !== "all");
-
   return (
     <div className="flex flex-col">
-      {/* ── 1. HERO ─────────────────────────────────────────────────────── */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden mesh-bg">
-        {/* Floating orbs */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 overflow-hidden"
-        >
-          <motion.div
-            animate={{
-              y: [0, -28, 0],
-              scale: [1, 1.08, 1],
-              opacity: [0.18, 0.28, 0.18],
+      {/* ── Hero ── */}
+      <section className="relative min-h-[92vh] flex items-center justify-center overflow-hidden px-4 py-24">
+        {/* Background glows */}
+        <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-[var(--primary)] opacity-[0.07] blur-[120px] rounded-full" />
+          <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[300px] bg-[var(--accent)] opacity-[0.05] blur-[100px] rounded-full" />
+          {/* Grid overlay */}
+          <div
+            className="absolute inset-0 opacity-[0.03]"
+            style={{
+              backgroundImage:
+                "linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)",
+              backgroundSize: "48px 48px",
             }}
-            transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute -top-32 -left-32 w-[520px] h-[520px] rounded-full bg-[var(--primary)] blur-[120px]"
-          />
-          <motion.div
-            animate={{
-              y: [0, 24, 0],
-              scale: [1, 1.06, 1],
-              opacity: [0.12, 0.2, 0.12],
-            }}
-            transition={{
-              duration: 11,
-              repeat: Infinity,
-              ease: "easeInOut",
-              delay: 2,
-            }}
-            className="absolute -bottom-40 -right-40 w-[480px] h-[480px] rounded-full bg-[var(--accent)] blur-[140px]"
-          />
-          <motion.div
-            animate={{
-              x: [0, 16, 0],
-              opacity: [0.06, 0.12, 0.06],
-            }}
-            transition={{
-              duration: 14,
-              repeat: Infinity,
-              ease: "easeInOut",
-              delay: 4,
-            }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full bg-[var(--primary-light)] blur-[180px]"
           />
         </div>
 
-        {/* Hero content */}
         <motion.div
           variants={heroVariants}
           initial="hidden"
           animate="visible"
-          className="relative z-10 flex flex-col items-center text-center px-4 sm:px-6 max-w-4xl mx-auto"
+          className="relative z-10 max-w-4xl mx-auto text-center flex flex-col items-center gap-6"
         >
           {/* Badge */}
           <motion.div variants={heroItem}>
-            <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass border border-[var(--accent)]/30 text-sm text-[var(--foreground)]/80 mb-8">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--accent)] opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--accent)]" />
-              </span>
-              Powered by {MODEL_DISPLAY}
+            <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide border border-[var(--primary)]/40 bg-[var(--primary)]/10 text-[var(--primary-light)]">
+              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+              AI-Powered QA Agent
             </span>
           </motion.div>
 
-          {/* H1 */}
+          {/* Headline */}
           <motion.h1
             variants={heroItem}
-            className="text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight text-balance leading-[1.08] mb-6"
+            className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight text-[var(--foreground)] text-balance leading-[1.1]"
           >
             Your AI-Powered{" "}
-            <span
-              className="bg-gradient-to-r from-[var(--primary)] via-[var(--primary-light)] to-[var(--accent)] bg-clip-text text-transparent"
-            >
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[var(--primary-light)] to-[var(--accent)] text-glow-primary">
               QA Engineer
             </span>
           </motion.h1>
 
-          {/* Subtitle */}
+          {/* Subheadline */}
           <motion.p
             variants={heroItem}
-            className="text-lg sm:text-xl text-[var(--muted-foreground)] max-w-2xl leading-relaxed mb-10 text-pretty"
+            className="text-base sm:text-lg text-[var(--muted-foreground)] max-w-2xl leading-relaxed text-pretty"
           >
-            {APP_TAGLINE}
+            Paste any live URL and get production-ready Playwright, Cypress, and Selenium test
+            scripts in seconds. Complete with Excel test case sheets and full coverage reports.
           </motion.p>
 
           {/* CTAs */}
           <motion.div
             variants={heroItem}
-            className="flex flex-col sm:flex-row items-center gap-4"
+            className="flex flex-col sm:flex-row items-center gap-3 mt-2"
           >
             <Link
               href="/chat-home-main-agent-chat-interface"
-              className="group inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-[var(--primary)] text-white font-semibold text-base transition-all duration-300 hover:bg-[var(--primary-light)] glow-primary hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              className="group inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-semibold text-sm transition-all duration-300 hover:bg-[var(--primary-light)] glow-primary hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             >
               <Play className="w-4 h-4" aria-hidden="true" />
               Start Testing
-              <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1" aria-hidden="true" />
+              <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>
             <Link
               href="/history"
-              className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl glass border border-[var(--border)] text-[var(--foreground)]/80 font-medium text-base transition-all duration-300 hover:border-[var(--primary)]/50 hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--border)] text-[var(--muted-foreground)] font-medium text-sm transition-all duration-300 hover:border-[var(--primary)]/50 hover:text-[var(--foreground)] hover:bg-white/5"
             >
-              <Clock className="w-4 h-4" aria-hidden="true" />
               View History
             </Link>
           </motion.div>
 
-          {/* Trust badges */}
+          {/* Stats row */}
           <motion.div
             variants={heroItem}
-            className="flex flex-wrap items-center justify-center gap-5 mt-14 text-xs text-[var(--muted-foreground)]"
+            className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-8 w-full max-w-2xl"
           >
-            {[
-              { icon: CheckCircle, label: "Playwright" },
-              { icon: CheckCircle, label: "Cypress" },
-              { icon: CheckCircle, label: "Selenium" },
-              { icon: CheckCircle, label: "Excel Export" },
-            ].map(({ icon: Icon, label }) => (
-              <span key={label} className="flex items-center gap-1.5">
-                <Icon className="w-3.5 h-3.5 text-[var(--accent)]" aria-hidden="true" />
-                {label}
-              </span>
+            {STATS.map((stat) => (
+              <div
+                key={stat.label}
+                className="glass rounded-xl p-4 flex flex-col items-center gap-1 border border-[var(--border)] hover:border-[var(--primary)]/30 transition-colors duration-300"
+              >
+                <stat.icon className="w-4 h-4 text-[var(--accent)] mb-1" aria-hidden="true" />
+                <span className="text-xl font-bold text-[var(--foreground)] tracking-tight">
+                  {stat.value}
+                </span>
+                <span className="text-[10px] text-[var(--muted-foreground)] text-center leading-tight">
+                  {stat.label}
+                </span>
+              </div>
             ))}
           </motion.div>
         </motion.div>
-
-        {/* Scroll cue */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1.8, duration: 0.6 }}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5"
-          aria-hidden="true"
-        >
-          <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-widest">
-            Scroll
-          </span>
-          <motion.div
-            animate={{ y: [0, 6, 0] }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
-            className="w-px h-8 bg-gradient-to-b from-[var(--muted-foreground)]/40 to-transparent"
-          />
-        </motion.div>
       </section>
 
-      {/* ── 2. HOW IT WORKS ─────────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-24 px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto">
+      {/* ── How It Works ── */}
+      <section className="py-24 px-4 border-t border-[var(--border)]">
+        <div className="max-w-5xl mx-auto">
           <Reveal className="text-center mb-16">
-            <span className="inline-block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)] mb-4">
+            <span className="text-xs font-semibold tracking-widest uppercase text-[var(--accent)] mb-3 block">
               How It Works
             </span>
-            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-[var(--foreground)] text-balance">
+            <h2 className="text-3xl sm:text-4xl font-bold text-[var(--foreground)] tracking-tight text-balance">
               From URL to Test Suite in Seconds
             </h2>
           </Reveal>
 
-          <div className="relative grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
-            {/* Connecting line (desktop only) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative">
+            {/* Connector line (desktop) */}
             <div
+              className="hidden md:block absolute top-10 left-[calc(16.67%+1rem)] right-[calc(16.67%+1rem)] h-px bg-gradient-to-r from-[var(--accent)]/30 via-[var(--primary)]/30 to-[var(--accent)]/30"
               aria-hidden="true"
-              className="hidden md:block absolute top-[3.25rem] left-[calc(33.33%+1rem)] right-[calc(33.33%+1rem)] h-px bg-gradient-to-r from-[var(--accent)]/30 via-[var(--primary)]/40 to-[var(--accent)]/30"
             />
 
             {HOW_IT_WORKS.map((step, i) => (
               <Reveal key={step.step} delay={i * 0.12}>
-                <div className="relative glass rounded-2xl p-7 border border-[var(--border)] hover:border-[var(--primary)]/40 transition-all duration-300 h-full">
-                  {/* Step number */}
-                  <span className="absolute top-5 right-6 text-5xl font-black text-[var(--foreground)]/5 select-none leading-none">
-                    {step.step}
-                  </span>
-
-                  {/* Icon */}
-                  <div
-                    className={`w-12 h-12 rounded-xl ${step.iconBg} flex items-center justify-center mb-5`}
-                  >
-                    <step.icon
-                      className={`w-6 h-6 ${step.iconColor}`}
-                      aria-hidden="true"
-                    />
+                <div className="glass rounded-2xl p-6 border border-[var(--border)] hover:border-[var(--primary)]/30 transition-all duration-300 flex flex-col gap-4 h-full">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${step.iconBg}`}
+                    >
+                      <step.icon className={`w-5 h-5 ${step.iconColor}`} aria-hidden="true" />
+                    </div>
+                    <span className="text-3xl font-black text-[var(--border)] font-mono leading-none">
+                      {step.step}
+                    </span>
                   </div>
-
-                  <h3 className="text-lg font-semibold text-[var(--foreground)] mb-2">
-                    {step.title}
-                  </h3>
+                  <h3 className="text-base font-semibold text-[var(--foreground)]">{step.title}</h3>
                   <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
                     {step.description}
                   </p>
-
-                  {/* Arrow connector (mobile) */}
-                  {i < HOW_IT_WORKS.length - 1 && (
-                    <div
-                      aria-hidden="true"
-                      className="md:hidden flex justify-center mt-6"
-                    >
-                      <ChevronRight className="w-5 h-5 text-[var(--muted-foreground)]/40 rotate-90" />
-                    </div>
-                  )}
                 </div>
               </Reveal>
             ))}
@@ -349,157 +259,130 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── 3. FEATURES ─────────────────────────────────────────────────── */}
-      <section
-        id="features"
-        className="py-24 px-4 sm:px-6 bg-[var(--card)]/30"
-      >
+      {/* ── Features ── */}
+      <section className="py-24 px-4 bg-[var(--card)]/30">
         <div className="max-w-6xl mx-auto">
           <Reveal className="text-center mb-16">
-            <span className="inline-block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--primary-light)] mb-4">
+            <span className="text-xs font-semibold tracking-widest uppercase text-[var(--primary-light)] mb-3 block">
               Features
             </span>
-            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-[var(--foreground)] text-balance">
+            <h2 className="text-3xl sm:text-4xl font-bold text-[var(--foreground)] tracking-tight text-balance">
               Everything Your QA Team Needs
             </h2>
+            <p className="mt-3 text-[var(--muted-foreground)] text-base max-w-xl mx-auto">
+              From URL analysis to downloadable test scripts and Excel sheets.
+            </p>
           </Reveal>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-60px" }}
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"
+          >
             {FEATURES.map((feature, i) => (
-              <Reveal key={feature.title} delay={i * 0.08}>
+              <motion.div
+                key={feature.title}
+                variants={fadeInUp}
+                className={`glass rounded-2xl p-6 border border-[var(--border)] transition-all duration-300 flex flex-col gap-4 ${feature.borderHover} hover:shadow-[0_4px_24px_rgba(124,58,237,0.12)]`}
+              >
                 <div
-                  className={`glass rounded-xl p-6 border border-[var(--border)] ${feature.borderHover} transition-all duration-300 h-full group cursor-default`}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${feature.colorClass}`}
                 >
-                  <div
-                    className={`w-11 h-11 rounded-xl ${feature.colorClass} flex items-center justify-center mb-4 transition-transform duration-300 group-hover:scale-110`}
-                  >
-                    <feature.icon className="w-5 h-5" aria-hidden="true" />
-                  </div>
-                  <h3 className="text-base font-semibold text-[var(--foreground)] mb-2">
+                  <feature.icon className="w-5 h-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--foreground)] mb-1.5">
                     {feature.title}
                   </h3>
                   <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
                     {feature.description}
                   </p>
                 </div>
-              </Reveal>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </div>
       </section>
 
-      {/* ── 4. FRAMEWORKS ───────────────────────────────────────────────── */}
-      <section id="frameworks" className="py-24 px-4 sm:px-6">
-        <div className="max-w-5xl mx-auto">
-          <Reveal className="text-center mb-14">
-            <span className="inline-block text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)] mb-4">
+      {/* ── Frameworks ── */}
+      <section className="py-24 px-4 border-t border-[var(--border)]">
+        <div className="max-w-4xl mx-auto">
+          <Reveal className="text-center mb-12">
+            <span className="text-xs font-semibold tracking-widest uppercase text-[var(--accent)] mb-3 block">
               Frameworks
             </span>
-            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-[var(--foreground)] text-balance">
+            <h2 className="text-3xl sm:text-4xl font-bold text-[var(--foreground)] tracking-tight text-balance">
               Generate Scripts for Any Framework
             </h2>
           </Reveal>
 
-          {/* Framework pills */}
-          <Reveal className="flex flex-wrap justify-center gap-3 mb-12">
-            {displayFrameworks.map((fw, i) => {
-              const dotColor =
-                i % 2 === 0 ? "bg-[var(--accent)]" : "bg-[var(--primary-light)]";
-              return (
-                <span
+          <Reveal delay={0.1}>
+            <div className="flex flex-wrap justify-center gap-4">
+              {FRAMEWORKS.filter((f) => f.value !== "all").map((fw) => (
+                <div
                   key={fw.value}
-                  className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full glass border border-[var(--border)] text-sm font-medium text-[var(--foreground)]/80 hover:border-[var(--primary)]/40 transition-colors duration-200"
+                  className="glass rounded-2xl px-8 py-5 border border-[var(--border)] flex flex-col items-center gap-2 min-w-[140px] hover:border-[var(--primary)]/40 transition-all duration-300 hover:scale-[1.03]"
                 >
-                  <span
-                    className={`w-2 h-2 rounded-full ${dotColor} flex-shrink-0`}
+                  <Terminal
+                    className="w-6 h-6"
+                    style={{ color: fw.color }}
                     aria-hidden="true"
                   />
-                  {fw.label}
-                </span>
-              );
-            })}
-          </Reveal>
-
-          {/* Code preview card */}
-          <Reveal>
-            <div className="glass rounded-2xl border border-[var(--border)] overflow-hidden shadow-[0_8px_40px_-12px_rgba(124,58,237,0.25)]">
-              {/* Card header */}
-              <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--border)] bg-[var(--card)]/60">
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1.5" aria-hidden="true">
-                    <span className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-                    <span className="w-3 h-3 rounded-full bg-[#febc2e]" />
-                    <span className="w-3 h-3 rounded-full bg-[#28c840]" />
-                  </div>
-                  <span className="ml-2 text-xs text-[var(--muted-foreground)] font-mono">
-                    homepage.spec.ts
+                  <span className="text-sm font-semibold text-[var(--foreground)]">
+                    {fw.label}
+                  </span>
+                  <span className="text-[10px] font-mono text-[var(--muted-foreground)]">
+                    {fw.value === "playwright"
+                      ? "TypeScript"
+                      : fw.value === "cypress"
+                      ? "JavaScript"
+                      : "Python"}
                   </span>
                 </div>
-                <span className="text-[10px] font-semibold uppercase tracking-widest px-2.5 py-1 rounded-full bg-[var(--accent)]/15 text-[var(--accent)]">
-                  TypeScript
-                </span>
-              </div>
-
-              {/* Code block */}
-              <div className="overflow-x-auto">
-                <pre className="p-6 text-xs leading-relaxed text-[var(--foreground)]/85 font-mono">
-                  <code>{PLAYWRIGHT_SNIPPET}</code>
-                </pre>
-              </div>
+              ))}
             </div>
           </Reveal>
         </div>
       </section>
 
-      {/* ── 5. CTA ──────────────────────────────────────────────────────── */}
-      <section className="py-24 px-4 sm:px-6">
-        <div className="max-w-3xl mx-auto">
+      {/* ── CTA ── */}
+      <section className="py-24 px-4 border-t border-[var(--border)] bg-gradient-to-b from-transparent to-[var(--card)]/40">
+        <div className="max-w-2xl mx-auto text-center">
           <Reveal>
-            <div className="gradient-border relative rounded-2xl overflow-hidden">
-              {/* Glow backdrop */}
+            <div className="glass rounded-3xl p-10 border border-[var(--primary)]/20 relative overflow-hidden">
+              {/* Glow */}
               <div
+                className="absolute inset-0 pointer-events-none"
                 aria-hidden="true"
-                className="absolute inset-0 bg-gradient-to-br from-[var(--primary)]/10 via-transparent to-[var(--accent)]/10 pointer-events-none"
-              />
-              <div
-                aria-hidden="true"
-                className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 rounded-full bg-[var(--primary)] blur-[100px] opacity-20 pointer-events-none"
-              />
-
-              <div className="relative glass rounded-2xl px-8 py-14 sm:px-14 text-center">
-                <span className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[var(--primary)]/20 border border-[var(--primary)]/30 text-xs font-semibold text-[var(--primary-light)] mb-6">
-                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-                  Ready to automate?
-                </span>
-
-                <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[var(--foreground)] mb-4 text-balance">
+              >
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 bg-[var(--primary)] opacity-10 blur-3xl rounded-full" />
+              </div>
+              <div className="relative z-10 flex flex-col items-center gap-5">
+                <div className="w-14 h-14 rounded-2xl bg-[var(--primary)]/20 flex items-center justify-center glow-primary">
+                  <Sparkles className="w-7 h-7 text-[var(--primary-light)]" aria-hidden="true" />
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight text-balance">
                   Ready to Automate Your QA?
                 </h2>
-                <p className="text-[var(--muted-foreground)] text-base leading-relaxed mb-10 max-w-lg mx-auto">
-                  Paste a URL, pick your frameworks, and let {APP_NAME} generate
-                  production-ready test scripts and Excel test case sheets in
-                  seconds.
+                <p className="text-[var(--muted-foreground)] text-sm leading-relaxed max-w-md">
+                  Join teams using AI to ship faster with confidence. Start testing any website in seconds.
                 </p>
-
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <div className="flex flex-col sm:flex-row items-center gap-3 mt-2">
                   <Link
                     href="/chat-home-main-agent-chat-interface"
-                    className="group inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-[var(--primary)] text-white font-semibold text-base transition-all duration-300 hover:bg-[var(--primary-light)] glow-primary hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                    className="group inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[var(--primary)] text-white font-semibold text-sm transition-all duration-300 hover:bg-[var(--primary-light)] glow-primary hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                   >
-                    <Sparkles className="w-4 h-4" aria-hidden="true" />
+                    <Play className="w-4 h-4" aria-hidden="true" />
                     Launch QA Agent
-                    <ArrowRight
-                      className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1"
-                      aria-hidden="true"
-                    />
+                    <ChevronRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden="true" />
                   </Link>
-
                   <Link
                     href="/settings"
-                    className="inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] rounded-lg px-2 py-1"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--border)] text-[var(--muted-foreground)] font-medium text-sm transition-all duration-300 hover:border-[var(--primary)]/50 hover:text-[var(--foreground)] hover:bg-white/5"
                   >
                     Configure Settings
-                    <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
                   </Link>
                 </div>
               </div>

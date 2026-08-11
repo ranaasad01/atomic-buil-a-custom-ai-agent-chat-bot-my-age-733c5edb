@@ -12,15 +12,15 @@ export const metadata: Metadata = {
     template: "%s | QA Agent AI",
   },
   description:
-    "Paste any live URL and let Claude 3.5 Sonnet crawl, analyze, and generate production-ready Playwright, Cypress, and Selenium test scripts in seconds.",
+    "Paste any live URL and let the AI agent crawl, analyze, and generate production-ready Playwright, Cypress, and Selenium test scripts in seconds.",
   keywords: [
     "QA automation",
     "AI testing",
     "Playwright",
     "Cypress",
     "Selenium",
-    "Claude",
     "end-to-end testing",
+    "test automation",
   ],
   openGraph: {
     title: "QA Agent AI — AI-Powered End-to-End Testing",

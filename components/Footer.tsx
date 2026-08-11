@@ -61,10 +61,10 @@ export default function Footer() {
             </nav>
           </div>
 
-          {/* Powered By */}
+          {/* Built With */}
           <div className="flex flex-col gap-3">
             <h3 className="text-xs font-semibold text-[var(--foreground)] uppercase tracking-widest">
-              Powered By
+              Built With
             </h3>
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
@@ -72,8 +72,8 @@ export default function Footer() {
                   className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] inline-block flex-shrink-0"
                   aria-hidden="true"
                 />
-                <span className="text-sm font-medium text-[var(--accent)]">
-                  Claude 3.5 Sonnet
+                <span className="text-sm text-[var(--muted-foreground)]">
+                  Next.js
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -82,7 +82,16 @@ export default function Footer() {
                   aria-hidden="true"
                 />
                 <span className="text-sm text-[var(--muted-foreground)]">
-                  Anthropic
+                  TypeScript
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-[var(--muted-foreground)]/40 inline-block flex-shrink-0"
+                  aria-hidden="true"
+                />
+                <span className="text-sm text-[var(--muted-foreground)]">
+                  Tailwind CSS
                 </span>
               </div>
             </div>

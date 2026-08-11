@@ -15,9 +15,6 @@ import { fadeInUp, staggerContainer } from "@/lib/motion";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const MODEL_DISPLAY = "Claude 3.5 Sonnet";
-const MODEL_ID = "claude-3-5-sonnet-20241022";
-
 const STORAGE_KEYS = {
   API_KEY: "qa_agent_api_key",
   API_MODE: "qa_agent_api_mode",
@@ -127,7 +124,7 @@ function StatusBadge({ status }: { status: SaveStatus }) {
         "inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full",
         status === "saved"
           ? "bg-emerald-500/15 text-emerald-400"
-          : "bg-red-500/15 text-red-400"
+          : "bg-[var(--destructive)]/15 text-[var(--destructive)]"
       )}
     >
       {status === "saved" ? (
@@ -140,573 +137,505 @@ function StatusBadge({ status }: { status: SaveStatus }) {
   );
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  // API Key
+  // ── API Key state ──
   const [apiMode, setApiMode] = useState<ApiMode>("env");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [apiSaveStatus, setApiSaveStatus] = useState<SaveStatus>("idle");
-  const [copied, setCopied] = useState(false);
+  const [apiStatus, setApiStatus] = useState<SaveStatus>("idle");
 
-  // Agent Prompt
-  const [agentPrompt, setAgentPrompt] = useState(DEFAULT_AGENT_PROMPT);
-  const [promptSaveStatus, setPromptSaveStatus] = useState<SaveStatus>("idle");
-  const [promptDirty, setPromptDirty] = useState(false);
-  const [activePreset, setActivePreset] = useState<string | null>("default");
-
-  // Frameworks
-  const [selectedFrameworks, setSelectedFrameworks] = useState<Framework[]>(["all"]);
-  const [frameworkSaveStatus, setFrameworkSaveStatus] = useState<SaveStatus>("idle");
-
-  // Danger Zone
-  const [dangerConfirm, setDangerConfirm] = useState<DangerAction>(null);
-
-  // ─── Load from localStorage ───────────────────────────────────────────────
-
-  useEffect(() => {
-    const storedMode = localStorage.getItem(STORAGE_KEYS.API_MODE) as ApiMode | null;
-    if (storedMode === "env" || storedMode === "runtime") setApiMode(storedMode);
-
-    const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
-    if (storedKey) setApiKey(storedKey);
-
-    const storedPrompt = localStorage.getItem(STORAGE_KEYS.PROMPT);
-    if (storedPrompt) {
-      setAgentPrompt(storedPrompt);
-      setActivePreset(null);
-    }
-
-    const storedFw = localStorage.getItem(STORAGE_KEYS.FRAMEWORKS);
-    if (storedFw) {
-      try {
-        const parsed = JSON.parse(storedFw) as Framework[];
-        if (Array.isArray(parsed) && parsed.length > 0) setSelectedFrameworks(parsed);
-      } catch {
-        setSelectedFrameworks(["all"]);
-      }
-    }
-  }, []);
-
-  // ─── Auto-clear status ────────────────────────────────────────────────────
-
-  const withAutoClear = useCallback(
-    (setter: (s: SaveStatus) => void, status: SaveStatus) => {
-      setter(status);
-      setTimeout(() => setter("idle"), 2500);
-    },
-    []
+  // ── Prompt state ──
+  const [prompt, setPrompt] = useState(DEFAULT_AGENT_PROMPT);
+  const [promptStatus, setPromptStatus] = useState<SaveStatus>("idle");
+  const [promptCharCount, setPromptCharCount] = useState(
+    DEFAULT_AGENT_PROMPT.length
   );
 
-  // ─── API Key handlers ─────────────────────────────────────────────────────
+  // ── Framework state ──
+  const [selectedFrameworks, setSelectedFrameworks] = useState<Framework[]>([
+    "playwright",
+  ]);
+  const [frameworkStatus, setFrameworkStatus] = useState<SaveStatus>("idle");
 
+  // ── Danger zone state ──
+  const [dangerAction, setDangerAction] = useState<DangerAction>(null);
+
+  // ── Load from localStorage ──
+  useEffect(() => {
+    try {
+      const storedMode = localStorage.getItem(STORAGE_KEYS.API_MODE) as ApiMode | null;
+      if (storedMode) setApiMode(storedMode);
+
+      const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
+      if (storedKey) setApiKey(storedKey);
+
+      const storedPrompt = localStorage.getItem(STORAGE_KEYS.PROMPT);
+      if (storedPrompt) {
+        setPrompt(storedPrompt);
+        setPromptCharCount(storedPrompt.length);
+      }
+
+      const storedFrameworks = localStorage.getItem(STORAGE_KEYS.FRAMEWORKS);
+      if (storedFrameworks) {
+        const parsed = JSON.parse(storedFrameworks) as Framework[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSelectedFrameworks(parsed);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  // ── Auto-clear status badges ──
+  useEffect(() => {
+    if (apiStatus !== "idle") {
+      const t = setTimeout(() => setApiStatus("idle"), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [apiStatus]);
+
+  useEffect(() => {
+    if (promptStatus !== "idle") {
+      const t = setTimeout(() => setPromptStatus("idle"), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [promptStatus]);
+
+  useEffect(() => {
+    if (frameworkStatus !== "idle") {
+      const t = setTimeout(() => setFrameworkStatus("idle"), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [frameworkStatus]);
+
+  // ── Handlers ──
   const handleSaveApiKey = useCallback(() => {
     try {
-      localStorage.setItem(STORAGE_KEYS.API_KEY, apiKey);
       localStorage.setItem(STORAGE_KEYS.API_MODE, apiMode);
-      withAutoClear(setApiSaveStatus, "saved");
+      if (apiMode === "runtime" && apiKey.trim()) {
+        localStorage.setItem(STORAGE_KEYS.API_KEY, apiKey.trim());
+      } else if (apiMode === "env") {
+        localStorage.removeItem(STORAGE_KEYS.API_KEY);
+      }
+      setApiStatus("saved");
     } catch {
-      withAutoClear(setApiSaveStatus, "error");
+      setApiStatus("error");
     }
-  }, [apiKey, apiMode, withAutoClear]);
-
-  const handleCopyKey = useCallback(() => {
-    if (!apiKey) return;
-    navigator.clipboard.writeText(apiKey).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }, [apiKey]);
-
-  // ─── Prompt handlers ──────────────────────────────────────────────────────
-
-  const handlePromptChange = useCallback((val: string) => {
-    setAgentPrompt(val);
-    setPromptDirty(true);
-    setActivePreset(null);
-  }, []);
-
-  const handleSelectPreset = useCallback((preset: (typeof PROMPT_PRESETS)[number]) => {
-    setAgentPrompt(preset.prompt);
-    setActivePreset(preset.id);
-    setPromptDirty(true);
-  }, []);
+  }, [apiMode, apiKey]);
 
   const handleSavePrompt = useCallback(() => {
     try {
-      localStorage.setItem(STORAGE_KEYS.PROMPT, agentPrompt);
-      setPromptDirty(false);
-      withAutoClear(setPromptSaveStatus, "saved");
+      localStorage.setItem(STORAGE_KEYS.PROMPT, prompt);
+      setPromptStatus("saved");
     } catch {
-      withAutoClear(setPromptSaveStatus, "error");
+      setPromptStatus("error");
     }
-  }, [agentPrompt, withAutoClear]);
+  }, [prompt]);
 
   const handleResetPrompt = useCallback(() => {
-    setAgentPrompt(DEFAULT_AGENT_PROMPT);
-    setActivePreset("default");
-    setPromptDirty(false);
+    setPrompt(DEFAULT_AGENT_PROMPT);
+    setPromptCharCount(DEFAULT_AGENT_PROMPT.length);
     try {
-      localStorage.setItem(STORAGE_KEYS.PROMPT, DEFAULT_AGENT_PROMPT);
-      withAutoClear(setPromptSaveStatus, "saved");
+      localStorage.removeItem(STORAGE_KEYS.PROMPT);
     } catch {
-      withAutoClear(setPromptSaveStatus, "error");
+      // ignore
     }
-  }, [withAutoClear]);
-
-  // ─── Framework handlers ───────────────────────────────────────────────────
-
-  const handleFrameworkToggle = useCallback((fw: Framework) => {
-    setSelectedFrameworks((prev) => {
-      if (fw === "all") return ["all"];
-      const withoutAll = prev.filter((f) => f !== "all");
-      if (withoutAll.includes(fw)) {
-        const next = withoutAll.filter((f) => f !== fw);
-        return next.length === 0 ? ["all"] : next;
-      }
-      return [...withoutAll, fw];
-    });
   }, []);
 
   const handleSaveFrameworks = useCallback(() => {
     try {
-      localStorage.setItem(STORAGE_KEYS.FRAMEWORKS, JSON.stringify(selectedFrameworks));
-      withAutoClear(setFrameworkSaveStatus, "saved");
+      localStorage.setItem(
+        STORAGE_KEYS.FRAMEWORKS,
+        JSON.stringify(selectedFrameworks)
+      );
+      setFrameworkStatus("saved");
     } catch {
-      withAutoClear(setFrameworkSaveStatus, "error");
+      setFrameworkStatus("error");
     }
-  }, [selectedFrameworks, withAutoClear]);
+  }, [selectedFrameworks]);
 
-  // ─── Danger Zone handlers ─────────────────────────────────────────────────
+  const toggleFramework = useCallback((fw: Framework) => {
+    setSelectedFrameworks((prev) =>
+      prev.includes(fw)
+        ? prev.length > 1
+          ? prev.filter((f) => f !== fw)
+          : prev
+        : [...prev, fw]
+    );
+  }, []);
 
   const handleDangerConfirm = useCallback(() => {
-    if (dangerConfirm === "history") {
-      localStorage.removeItem(STORAGE_KEYS.HISTORY);
-    } else if (dangerConfirm === "reset") {
-      Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
-      setApiMode("env");
-      setApiKey("");
-      setAgentPrompt(DEFAULT_AGENT_PROMPT);
-      setSelectedFrameworks(["all"]);
-      setActivePreset("default");
-      setPromptDirty(false);
+    try {
+      if (dangerAction === "history") {
+        localStorage.removeItem(STORAGE_KEYS.HISTORY);
+      } else if (dangerAction === "reset") {
+        Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
+        setApiKey("");
+        setApiMode("env");
+        setPrompt(DEFAULT_AGENT_PROMPT);
+        setPromptCharCount(DEFAULT_AGENT_PROMPT.length);
+        setSelectedFrameworks(["playwright"]);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDangerAction(null);
     }
-    setDangerConfirm(null);
-  }, [dangerConfirm]);
+  }, [dangerAction]);
 
-  // ─── Derived ──────────────────────────────────────────────────────────────
-
-  const wordCount = agentPrompt.trim().split(/\s+/).filter(Boolean).length;
-  const charCount = agentPrompt.length;
-
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const handleCopyPrompt = useCallback(() => {
+    navigator.clipboard.writeText(prompt).catch(() => {});
+  }, [prompt]);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
-      {/* Page Header */}
-      <Reveal>
+    <div className="min-h-screen py-12 px-4">
+      <div className="max-w-3xl mx-auto">
+        {/* Page header */}
+        <Reveal>
+          <div className="mb-10">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-9 h-9 rounded-xl bg-[var(--primary)]/20 flex items-center justify-center">
+                <Settings className="w-5 h-5 text-[var(--primary-light)]" />
+              </div>
+              <h1 className="text-2xl font-bold text-[var(--foreground)] tracking-tight">
+                Settings
+              </h1>
+            </div>
+            <p className="text-sm text-[var(--muted-foreground)] ml-12">
+              Configure your {APP_NAME} — API access, agent behavior, and framework preferences.
+            </p>
+          </div>
+        </Reveal>
+
         <motion.div
-          variants={fadeInUp}
+          variants={staggerContainer}
           initial="hidden"
           animate="visible"
-          className="mb-8"
+          className="flex flex-col gap-6"
         >
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-9 h-9 rounded-xl bg-[var(--primary)]/20 flex items-center justify-center">
-              <Settings className="w-5 h-5 text-[var(--primary-light)]" />
-            </div>
-            <h1 className="text-2xl font-bold text-[var(--foreground)] tracking-tight">
-              Settings
-            </h1>
-          </div>
-          <p className="text-sm text-[var(--muted-foreground)] ml-12">
-            Configure your {APP_NAME}
-          </p>
-        </motion.div>
-      </Reveal>
+          {/* ── API Key Section ── */}
+          <Reveal>
+            <SectionCard>
+              <SectionHeader icon={Key} title="API Key Configuration" />
 
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        animate="visible"
-        className="flex flex-col gap-6"
-      >
-        {/* ── Section 1: API Configuration ─────────────────────────────── */}
-        <motion.div variants={fadeInUp}>
-          <SectionCard>
-            <SectionHeader icon={Key} title="API Key Configuration" />
+              {/* Mode toggle */}
+              <div className="flex gap-2 mb-5">
+                {([
+                  { value: "env", label: "Environment Variable", icon: Shield },
+                  { value: "runtime", label: "Runtime Key", icon: Key },
+                ] as const).map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setApiMode(value)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 border",
+                      apiMode === value
+                        ? "bg-[var(--primary)]/20 border-[var(--primary)]/40 text-[var(--primary-light)]"
+                        : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--border)]/80"
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-            {/* Mode Toggle */}
-            <div className="flex gap-2 mb-5">
-              {(["env", "runtime"] as ApiMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setApiMode(mode)}
-                  className={cn(
-                    "flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all duration-200 border",
-                    apiMode === mode
-                      ? "bg-[var(--primary)]/20 border-[var(--primary)]/50 text-[var(--primary-light)]"
-                      : "bg-transparent border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/30"
-                  )}
-                >
-                  {mode === "env" ? "Environment Variable" : "Runtime Key"}
-                </button>
-              ))}
-            </div>
-
-            {/* Env Mode */}
-            {apiMode === "env" && (
-              <div className="rounded-lg border border-[var(--accent)]/20 bg-[var(--accent)]/5 p-4 flex gap-3">
-                <Info className="w-4 h-4 text-[var(--accent)] mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-[var(--foreground)] mb-1">
-                    Using Environment Variable
-                  </p>
-                  <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                    Set{" "}
-                    <code className="font-mono text-[var(--accent)] bg-[var(--accent)]/10 px-1.5 py-0.5 rounded">
-                      ANTHROPIC_API_KEY
-                    </code>{" "}
-                    in your{" "}
-                    <code className="font-mono text-[var(--accent)] bg-[var(--accent)]/10 px-1.5 py-0.5 rounded">
-                      .env.local
-                    </code>{" "}
-                    file. The agent will pick it up automatically on the server side. No key is stored in the browser.
-                  </p>
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-xs text-emerald-400 font-medium">Recommended for production</span>
+              {apiMode === "env" ? (
+                <div className="rounded-lg bg-[var(--accent)]/8 border border-[var(--accent)]/20 p-4 flex gap-3">
+                  <Info className="w-4 h-4 text-[var(--accent)] flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-[var(--accent)] mb-1">
+                      Using environment variable
+                    </p>
+                    <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
+                      Set <code className="font-mono text-[var(--primary-light)] bg-[var(--primary)]/10 px-1 rounded">ANTHROPIC_API_KEY</code> in your{" "}
+                      <code className="font-mono text-[var(--primary-light)] bg-[var(--primary)]/10 px-1 rounded">.env.local</code> file.
+                      The AI model is configured and ready to use.
+                    </p>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Runtime Mode */}
-            {apiMode === "runtime" && (
-              <div className="flex flex-col gap-3">
-                <label className="text-xs font-medium text-[var(--muted-foreground)] uppercase tracking-wider">
-                  Anthropic API Key
-                </label>
-                <div className="relative">
-                  <input
-                    type={showKey ? "text" : "password"}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-ant-api03-..."
-                    className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2.5 pr-20 text-sm font-mono text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:outline-none focus:border-[var(--primary)]/60 transition-colors duration-200"
-                  />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                    {apiKey && (
-                      <button
-                        onClick={handleCopyKey}
-                        title="Copy key"
-                        className="p-1.5 rounded-md text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-colors duration-150"
-                      >
-                        {copied ? (
-                          <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    )}
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <label className="text-xs font-medium text-[var(--muted-foreground)] uppercase tracking-wider">
+                    API Key
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showKey ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="sk-ant-..."
+                      className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-2.5 pr-10 text-sm font-mono text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:outline-none focus:border-[var(--primary)]/60 transition-colors duration-200"
+                    />
                     <button
+                      type="button"
                       onClick={() => setShowKey((v) => !v)}
-                      title={showKey ? "Hide key" : "Show key"}
-                      className="p-1.5 rounded-md text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-colors duration-150"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+                      aria-label={showKey ? "Hide key" : "Show key"}
                     >
                       {showKey ? (
-                        <EyeOff className="w-3.5 h-3.5" />
+                        <EyeOff className="w-4 h-4" />
                       ) : (
-                        <Eye className="w-3.5 h-3.5" />
+                        <Eye className="w-4 h-4" />
                       )}
                     </button>
                   </div>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-[var(--muted-foreground)] flex items-center gap-1.5">
-                    <Shield className="w-3 h-3" />
-                    Stored in browser localStorage only
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    Your key is stored only in your browser's local storage and never sent to our servers.
                   </p>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={apiSaveStatus} />
-                    <button
-                      onClick={handleSaveApiKey}
-                      disabled={!apiKey.trim()}
-                      className={cn(
-                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200",
-                        apiKey.trim()
-                          ? "bg-[var(--primary)] text-white hover:bg-[var(--primary)]/80"
-                          : "bg-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"
-                      )}
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      Save Key
-                    </button>
-                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 mt-5">
+                <button
+                  type="button"
+                  onClick={handleSaveApiKey}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary)]/90 text-white text-sm font-medium transition-all duration-200"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Save
+                </button>
+                <StatusBadge status={apiStatus} />
+              </div>
+            </SectionCard>
+          </Reveal>
+
+          {/* ── AI Model Info ── */}
+          <Reveal>
+            <SectionCard>
+              <SectionHeader icon={Sparkles} title="AI Model" />
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--primary)]/8 border border-[var(--primary)]/20">
+                <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/20 flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-4 h-4 text-[var(--primary-light)]" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-[var(--foreground)]">
+                    AI Model configured
+                  </p>
+                  <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                    The agent uses a state-of-the-art large language model optimized for code generation and QA analysis.
+                  </p>
+                </div>
+                <div className="ml-auto flex-shrink-0">
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                    Active
+                  </span>
                 </div>
               </div>
-            )}
-          </SectionCard>
-        </motion.div>
+            </SectionCard>
+          </Reveal>
 
-        {/* ── Section 2: Agent Prompt ───────────────────────────────────── */}
-        <motion.div variants={fadeInUp}>
-          <SectionCard>
-            <SectionHeader icon={Bot} title="Agent System Prompt" />
+          {/* ── Agent System Prompt ── */}
+          <Reveal>
+            <SectionCard>
+              <SectionHeader icon={Bot} title="Agent System Prompt" />
 
-            {/* Preset Selector */}
-            <div className="mb-4">
-              <p className="text-xs font-medium text-[var(--muted-foreground)] uppercase tracking-wider mb-2">
-                Quick Presets
-              </p>
-              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+              {/* Preset chips */}
+              <div className="flex flex-wrap gap-2 mb-4">
                 {PROMPT_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
-                    onClick={() => handleSelectPreset(preset)}
+                    type="button"
+                    onClick={() => {
+                      setPrompt(preset.prompt);
+                      setPromptCharCount(preset.prompt.length);
+                    }}
                     className={cn(
-                      "shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all duration-200 whitespace-nowrap",
-                      activePreset === preset.id
-                        ? "bg-[var(--primary)]/20 border-[var(--primary)]/50 text-[var(--primary-light)]"
-                        : "bg-transparent border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/30"
+                      "px-3 py-1 rounded-full text-xs font-medium border transition-all duration-200",
+                      prompt === preset.prompt
+                        ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]"
+                        : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--border)]/80"
                     )}
                   >
                     {preset.label}
                   </button>
                 ))}
               </div>
-            </div>
 
-            {/* Textarea */}
-            <textarea
-              value={agentPrompt}
-              onChange={(e) => handlePromptChange(e.target.value)}
-              rows={12}
-              className="w-full h-72 bg-[var(--background)] border border-[var(--border)] rounded-lg p-3 text-sm font-mono text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:outline-none focus:border-[var(--primary)]/60 resize-y transition-colors duration-200 leading-relaxed"
-              placeholder="Enter your agent system prompt..."
-              spellCheck={false}
-            />
-
-            {/* Stats + Actions */}
-            <div className="flex items-center justify-between mt-3 flex-wrap gap-3">
-              <div className="flex items-center gap-4 text-xs text-[var(--muted-foreground)]">
-                <span>
-                  <span className="text-[var(--foreground)] font-medium">{charCount.toLocaleString("en-US")}</span>{" "}
-                  chars
-                </span>
-                <span>
-                  <span className="text-[var(--foreground)] font-medium">{wordCount.toLocaleString("en-US")}</span>{" "}
-                  words
-                </span>
-                {promptDirty && (
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
-                    Unsaved changes
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusBadge status={promptSaveStatus} />
+              {/* Textarea */}
+              <div className="relative">
+                <textarea
+                  value={prompt}
+                  onChange={(e) => {
+                    setPrompt(e.target.value);
+                    setPromptCharCount(e.target.value.length);
+                  }}
+                  rows={14}
+                  className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm font-mono text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 focus:outline-none focus:border-[var(--primary)]/60 transition-colors duration-200 resize-y leading-relaxed"
+                  placeholder="Enter your custom system prompt..."
+                />
                 <button
-                  onClick={handleResetPrompt}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--primary)]/30 transition-all duration-200"
+                  type="button"
+                  onClick={handleCopyPrompt}
+                  className="absolute top-3 right-3 p-1.5 rounded-md text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
+                  aria-label="Copy prompt"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Reset
+                  <Copy className="w-3.5 h-3.5" />
                 </button>
+              </div>
+              <p className="text-xs text-[var(--muted-foreground)] mt-1.5 text-right">
+                {promptCharCount.toLocaleString("en-US")} characters
+              </p>
+
+              <div className="flex items-center gap-3 mt-4">
                 <button
+                  type="button"
                   onClick={handleSavePrompt}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--primary)] text-white hover:bg-[var(--primary)]/80 transition-all duration-200"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary)]/90 text-white text-sm font-medium transition-all duration-200"
                 >
                   <Save className="w-3.5 h-3.5" />
                   Save Prompt
                 </button>
-              </div>
-            </div>
-          </SectionCard>
-        </motion.div>
-
-        {/* ── Section 3: Framework Preferences ─────────────────────────── */}
-        <motion.div variants={fadeInUp}>
-          <SectionCard>
-            <SectionHeader icon={Terminal} title="Test Framework Preferences" />
-
-            <div className="flex flex-wrap gap-2 mb-5">
-              {FRAMEWORKS.map((fw) => {
-                const isSelected = selectedFrameworks.includes(fw.value);
-                return (
-                  <button
-                    key={fw.value}
-                    onClick={() => handleFrameworkToggle(fw.value)}
-                    className={cn(
-                      "px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-200",
-                      isSelected
-                        ? "bg-[var(--accent)]/15 border-[var(--accent)]/50 text-[var(--accent)]"
-                        : "bg-transparent border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--accent)]/30"
-                    )}
-                  >
-                    {fw.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-[var(--muted-foreground)]">
-                Selected:{" "}
-                <span className="text-[var(--foreground)] font-medium">
-                  {selectedFrameworks.includes("all")
-                    ? "All Frameworks"
-                    : selectedFrameworks
-                        .map((f) => FRAMEWORKS.find((fw) => fw.value === f)?.label ?? f)
-                        .join(", ")}
-                </span>
-              </p>
-              <div className="flex items-center gap-2">
-                <StatusBadge status={frameworkSaveStatus} />
                 <button
+                  type="button"
+                  onClick={handleResetPrompt}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--border)]/80 text-sm font-medium transition-all duration-200"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reset
+                </button>
+                <StatusBadge status={promptStatus} />
+              </div>
+            </SectionCard>
+          </Reveal>
+
+          {/* ── Framework Preferences ── */}
+          <Reveal>
+            <SectionCard>
+              <SectionHeader icon={Terminal} title="Framework Preferences" />
+              <p className="text-xs text-[var(--muted-foreground)] mb-4">
+                Select which test frameworks the agent should generate scripts for by default.
+              </p>
+              <div className="flex flex-wrap gap-2 mb-5">
+                {FRAMEWORKS.map((fw) => {
+                  const active = selectedFrameworks.includes(fw.value);
+                  return (
+                    <button
+                      key={fw.value}
+                      type="button"
+                      onClick={() => toggleFramework(fw.value)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-200",
+                        active
+                          ? "border-transparent text-[var(--background)]"
+                          : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                      )}
+                      style={active ? { backgroundColor: fw.color } : {}}
+                    >
+                      {fw.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
                   onClick={handleSaveFrameworks}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--primary)] text-white hover:bg-[var(--primary)]/80 transition-all duration-200"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary)]/90 text-white text-sm font-medium transition-all duration-200"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  Save
+                  Save Preferences
                 </button>
+                <StatusBadge status={frameworkStatus} />
               </div>
-            </div>
-          </SectionCard>
-        </motion.div>
+            </SectionCard>
+          </Reveal>
 
-        {/* ── Section 4: Model Info ─────────────────────────────────────── */}
-        <motion.div variants={fadeInUp}>
-          <SectionCard>
-            <SectionHeader icon={Sparkles} title="AI Model" />
+          {/* ── Danger Zone ── */}
+          <Reveal>
+            <SectionCard className="border-[var(--destructive)]/30">
+              <SectionHeader
+                icon={Trash2}
+                title="Danger Zone"
+                iconColor="bg-[var(--destructive)]/15"
+              />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { label: "Model", value: MODEL_DISPLAY },
-                { label: "Model ID", value: MODEL_ID },
-                { label: "Provider", value: "Anthropic" },
-                { label: "Context Window", value: "200K tokens" },
-                { label: "Max Output", value: "8,192 tokens" },
-                { label: "Vision", value: "Yes" },
-              ].map((row) => (
-                <div
-                  key={row.label}
-                  className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)]"
-                >
-                  <span className="text-xs text-[var(--muted-foreground)] font-medium">
-                    {row.label}
-                  </span>
-                  <span className="text-xs font-mono text-[var(--foreground)] font-medium">
-                    {row.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </SectionCard>
-        </motion.div>
-
-        {/* ── Section 5: Danger Zone ────────────────────────────────────── */}
-        <motion.div variants={fadeInUp}>
-          <SectionCard className="border-[var(--destructive)]/30">
-            <SectionHeader
-              icon={Shield}
-              title="Danger Zone"
-              iconColor="bg-[var(--destructive)]/15"
-            />
-
-            <div className="flex flex-col gap-4">
-              {/* Clear History */}
-              <div className="flex items-start justify-between gap-4 p-4 rounded-lg bg-[var(--destructive)]/5 border border-[var(--destructive)]/15">
-                <div>
-                  <p className="text-sm font-medium text-[var(--foreground)] mb-0.5">
-                    Clear Chat History
-                  </p>
-                  <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                    Permanently removes all past chat sessions and test reports from local storage.
-                  </p>
-                </div>
-                <div className="shrink-0">
-                  {dangerConfirm === "history" ? (
-                    <div className="flex flex-col items-end gap-2">
-                      <p className="text-xs text-[var(--destructive)] font-medium whitespace-nowrap">
-                        Are you sure? This cannot be undone.
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setDangerConfirm(null)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors duration-150"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={handleDangerConfirm}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--destructive)] text-white hover:bg-[var(--destructive)]/80 transition-colors duration-150"
-                        >
-                          Confirm
-                        </button>
-                      </div>
+              <div className="flex flex-col gap-4">
+                {/* Clear history */}
+                <div className="flex items-start justify-between gap-4 p-4 rounded-lg border border-[var(--border)] bg-[var(--background)]/50">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      Clear Chat History
+                    </p>
+                    <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                      Delete all past chat sessions. This cannot be undone.
+                    </p>
+                  </div>
+                  {dangerAction === "history" ? (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleDangerConfirm}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--destructive)] text-white text-xs font-medium hover:bg-[var(--destructive)]/90 transition-colors"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDangerAction(null)}
+                        className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] text-xs font-medium hover:text-[var(--foreground)] transition-colors"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   ) : (
                     <button
-                      onClick={() => setDangerConfirm("history")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--destructive)]/40 text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-all duration-200"
+                      type="button"
+                      onClick={() => setDangerAction("history")}
+                      className="flex-shrink-0 px-3 py-1.5 rounded-lg border border-[var(--destructive)]/40 text-[var(--destructive)] text-xs font-medium hover:bg-[var(--destructive)]/10 transition-all duration-200"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
                       Clear History
                     </button>
                   )}
                 </div>
-              </div>
 
-              {/* Reset All Settings */}
-              <div className="flex items-start justify-between gap-4 p-4 rounded-lg bg-[var(--destructive)]/5 border border-[var(--destructive)]/15">
-                <div>
-                  <p className="text-sm font-medium text-[var(--foreground)] mb-0.5">
-                    Reset All Settings
-                  </p>
-                  <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                    Restores all settings to defaults, including API key, agent prompt, and framework preferences.
-                  </p>
-                </div>
-                <div className="shrink-0">
-                  {dangerConfirm === "reset" ? (
-                    <div className="flex flex-col items-end gap-2">
-                      <p className="text-xs text-[var(--destructive)] font-medium whitespace-nowrap">
-                        Are you sure? This cannot be undone.
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setDangerConfirm(null)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors duration-150"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={handleDangerConfirm}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--destructive)] text-white hover:bg-[var(--destructive)]/80 transition-colors duration-150"
-                        >
-                          Confirm
-                        </button>
-                      </div>
+                {/* Reset all */}
+                <div className="flex items-start justify-between gap-4 p-4 rounded-lg border border-[var(--border)] bg-[var(--background)]/50">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      Reset All Settings
+                    </p>
+                    <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                      Restore all settings to defaults including API key and prompts.
+                    </p>
+                  </div>
+                  {dangerAction === "reset" ? (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleDangerConfirm}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--destructive)] text-white text-xs font-medium hover:bg-[var(--destructive)]/90 transition-colors"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDangerAction(null)}
+                        className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] text-xs font-medium hover:text-[var(--foreground)] transition-colors"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   ) : (
                     <button
-                      onClick={() => setDangerConfirm("reset")}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--destructive)]/40 text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-all duration-200"
+                      type="button"
+                      onClick={() => setDangerAction("reset")}
+                      className="flex-shrink-0 px-3 py-1.5 rounded-lg border border-[var(--destructive)]/40 text-[var(--destructive)] text-xs font-medium hover:bg-[var(--destructive)]/10 transition-all duration-200"
                     >
-                      <RotateCcw className="w-3.5 h-3.5" />
                       Reset All
                     </button>
                   )}
                 </div>
               </div>
-            </div>
-          </SectionCard>
+            </SectionCard>
+          </Reveal>
         </motion.div>
-      </motion.div>
+      </div>
     </div>
   );
 }

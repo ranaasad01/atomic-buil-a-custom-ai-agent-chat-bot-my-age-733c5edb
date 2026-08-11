@@ -6,11 +6,11 @@
   },
   "footer": {
     "navigation": "Navigation",
-    "poweredBy": "Powered By",
-    "copyright": "© 2025 QA Agent AI. Built with Claude 3.5 Sonnet."
+    "builtWith": "Built With",
+    "copyright": "© 2025 QA Agent AI. All rights reserved."
   },
   "hero": {
-    "badge": "Powered by Claude 3.5 Sonnet",
+    "badge": "AI-Powered QA Automation",
     "title": "Your AI-Powered QA Engineer",
     "subtitle": "Paste any live URL and get production-ready Playwright, Cypress, and Selenium test scripts in seconds.",
     "cta": "Start Testing",
