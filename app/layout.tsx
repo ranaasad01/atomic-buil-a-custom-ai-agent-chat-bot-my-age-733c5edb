@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
+import ConditionalFooter from "@/components/ConditionalFooter";
 import LocaleProvider from "@/components/LocaleProvider";
 import LanguageToggle from "@/components/LanguageToggle";
 
@@ -54,27 +54,11 @@ export default function RootLayout({
           <div className="relative flex flex-col min-h-screen">
             <Navbar />
             <main className="flex-1">{children}</main>
-            <ChatPageFooterSuppressor>
-              <Footer />
-            </ChatPageFooterSuppressor>
+            <ConditionalFooter />
           </div>
           <LanguageToggle />
         </LocaleProvider>
       </body>
     </html>
   );
-}
-
-// Server component that conditionally renders Footer based on pathname
-import { headers } from "next/headers";
-
-async function ChatPageFooterSuppressor({ children }: { children: React.ReactNode }) {
-  const headersList = await headers();
-  const pathname = headersList.get("x-pathname") ?? "";
-  // Hide footer on chat pages
-  const isChatPage =
-    pathname === "/chat" ||
-    pathname.startsWith("/chat-home-main-agent-chat-interface");
-  if (isChatPage) return null;
-  return <>{children}</>;
 }
