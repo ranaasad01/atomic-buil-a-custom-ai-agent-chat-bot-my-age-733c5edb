@@ -94,5 +94,24 @@
   },
   "testimonials": {
     "title": "Trusted by QA Teams"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "signOut": "Sign Out",
+    "email": "Email address",
+    "password": "Password",
+    "confirmPassword": "Confirm password",
+    "fullName": "Full name",
+    "welcomeBack": "Welcome back",
+    "createAccount": "Create your account",
+    "signInSubtitle": "Sign in to your QA Agent account",
+    "signUpSubtitle": "Start automating your QA workflow",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?",
+    "checkEmail": "Check your email to confirm your account",
+    "accountCreated": "Account created!",
+    "googleSignIn": "Continue with Google",
+    "forgotPassword": "Forgot password?"
   }
 }

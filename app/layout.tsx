@@ -4,6 +4,7 @@ import Navbar from "@/components/Navbar";
 import ConditionalFooter from "@/components/ConditionalFooter";
 import LocaleProvider from "@/components/LocaleProvider";
 import LanguageToggle from "@/components/LanguageToggle";
+import { headers } from "next/headers";
 
 export const metadata: Metadata = {
   formatDetection: { telephone: false, date: false, email: false, address: false },
@@ -30,11 +31,16 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const headersList = await headers();
+  const pathname = headersList.get("x-pathname") ?? "";
+  const hideNavbar =
+    pathname.startsWith("/login") || pathname.startsWith("/signup");
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -52,7 +58,7 @@ export default function RootLayout({
       <body className="mesh-bg min-h-screen">
         <LocaleProvider>
           <div className="relative flex flex-col min-h-screen">
-            <Navbar />
+            {!hideNavbar && <Navbar />}
             <main className="flex-1">{children}</main>
             <ConditionalFooter />
           </div>

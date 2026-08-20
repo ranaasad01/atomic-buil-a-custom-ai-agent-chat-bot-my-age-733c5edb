@@ -2,12 +2,15 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { navLinks, APP_NAME, APP_VERSION } from "@/lib/data";
 import { navbarVariants } from "@/lib/motion";
-import { Sparkles, Menu, X } from 'lucide-react';
-import { useState } from "react";
+import { Sparkles, Menu, X, LogOut, UserCircle } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
+import type { User } from "@supabase/supabase-js";
+import { signOut } from "@/lib/supabase/db";
 
 const mobileMenuVariants = {
   hidden: { opacity: 0, y: -8, height: 0 },
@@ -27,12 +30,43 @@ const mobileMenuVariants = {
 
 export default function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const t = useTranslations();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.push("/login");
+  };
 
   const isActive = (href: string): boolean => {
     if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
+  };
+
+  const truncateEmail = (email: string): string => {
+    if (email.length <= 22) return email;
+    const [local, domain] = email.split("@");
+    if (!domain) return email.slice(0, 22) + "…";
+    const truncatedLocal = local.length > 10 ? local.slice(0, 10) + "…" : local;
+    return `${truncatedLocal}@${domain}`;
   };
 
   return (
@@ -90,6 +124,44 @@ export default function Navbar() {
                 </Link>
               );
             })}
+
+            {/* Desktop Auth Section */}
+            <div className="flex items-center gap-2 ml-2 pl-2 border-l border-[var(--border)]">
+              {user ? (
+                <>
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/5">
+                    <UserCircle className="w-4 h-4 text-[var(--primary-light)] flex-shrink-0" aria-hidden="true" />
+                    <span className="text-xs text-[var(--muted-foreground)] max-w-[140px] truncate">
+                      {truncateEmail(user.email ?? "User")}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-[var(--muted-foreground)] hover:text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-all duration-200"
+                    aria-label="Sign out"
+                  >
+                    <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span className="text-xs">Sign Out</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    className="px-3 py-1.5 rounded-md text-sm bg-[var(--primary)]/20 text-[var(--primary-light)] border border-[var(--primary)]/30 hover:bg-[var(--primary)]/30 transition-all duration-200"
+                  >
+                    Sign In
+                  </Link>
+                  <Link
+                    href="/signup"
+                    className="px-3 py-1.5 rounded-md text-sm bg-[var(--primary)] text-white hover:bg-[var(--primary)]/90 transition-all duration-200 shadow-[0_0_12px_rgba(124,58,237,0.3)]"
+                  >
+                    Sign Up
+                  </Link>
+                </>
+              )}
+            </div>
           </nav>
 
           {/* Mobile hamburger */}
@@ -112,16 +184,18 @@ export default function Navbar() {
       {/* Mobile slide-down panel */}
       <AnimatePresence>
         {mobileOpen && (
-          <motion.nav
+          <motion.div
             key="mobile-menu"
             variants={mobileMenuVariants}
             initial="hidden"
             animate="visible"
             exit="exit"
-            className="md:hidden overflow-hidden border-t border-[var(--border)] bg-[var(--card)]/80 backdrop-blur-xl"
-            aria-label="Mobile navigation"
+            className="md:hidden overflow-hidden border-t border-[var(--border)] bg-[var(--card)]/95 backdrop-blur-xl"
           >
-            <div className="px-4 py-3 flex flex-col gap-1">
+            <nav
+              className="flex flex-col gap-1 px-4 py-3"
+              aria-label="Mobile navigation"
+            >
               {navLinks.map((link) => {
                 const active = isActive(link.href);
                 return (
@@ -138,7 +212,7 @@ export default function Navbar() {
                     aria-current={active ? "page" : undefined}
                   >
                     {link.icon && (
-                      <span className="text-xs" aria-hidden="true">
+                      <span className="text-base" aria-hidden="true">
                         {link.icon}
                       </span>
                     )}
@@ -146,8 +220,50 @@ export default function Navbar() {
                   </Link>
                 );
               })}
-            </div>
-          </motion.nav>
+
+              {/* Mobile Auth Section */}
+              <div className="mt-2 pt-2 border-t border-[var(--border)] flex flex-col gap-2">
+                {user ? (
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-white/5">
+                      <UserCircle className="w-4 h-4 text-[var(--primary-light)] flex-shrink-0" aria-hidden="true" />
+                      <span className="text-xs text-[var(--muted-foreground)] truncate">
+                        {user.email ?? "User"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileOpen(false);
+                        handleSignOut();
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 rounded-md text-sm text-[var(--muted-foreground)] hover:text-[var(--destructive)] hover:bg-[var(--destructive)]/10 transition-all duration-200 w-full text-left"
+                    >
+                      <LogOut className="w-4 h-4" aria-hidden="true" />
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Link
+                      href="/login"
+                      onClick={() => setMobileOpen(false)}
+                      className="flex items-center justify-center px-3 py-2 rounded-md text-sm bg-[var(--primary)]/20 text-[var(--primary-light)] border border-[var(--primary)]/30 hover:bg-[var(--primary)]/30 transition-all duration-200"
+                    >
+                      Sign In
+                    </Link>
+                    <Link
+                      href="/signup"
+                      onClick={() => setMobileOpen(false)}
+                      className="flex items-center justify-center px-3 py-2 rounded-md text-sm bg-[var(--primary)] text-white hover:bg-[var(--primary)]/90 transition-all duration-200"
+                    >
+                      Sign Up
+                    </Link>
+                  </>
+                )}
+              </div>
+            </nav>
+          </motion.div>
         )}
       </AnimatePresence>
     </motion.header>

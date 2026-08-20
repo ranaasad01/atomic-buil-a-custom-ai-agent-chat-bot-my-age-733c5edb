@@ -8,7 +8,9 @@ export default function ConditionalFooter() {
 
   if (
     pathname === "/chat" ||
-    pathname.startsWith("/chat-home-main-agent-chat-interface")
+    pathname.startsWith("/chat-home-main-agent-chat-interface") ||
+    pathname === "/login" ||
+    pathname === "/signup"
   ) {
     return null;
   }

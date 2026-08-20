@@ -8,6 +8,8 @@ import { Reveal } from "@/components/Reveal";
 import { fadeInUp, staggerContainer, scaleIn } from "@/lib/motion";
 import type { ChatSession } from "@/lib/data";
 import { cn } from "@/lib/utils";
+import type { User } from "@supabase/supabase-js";
+import { getCurrentUser, getUserSessions, deleteSession, deleteAllSessions } from "@/lib/supabase/db";
 
 // ─── Storage key (mirrors what the chat interface uses) ──────────────────────
 const STORAGE_KEYS = {
@@ -58,7 +60,6 @@ function getLastAssistantPreview(session: ChatSession): string {
   const msgs = [...(session.messages ?? [])].reverse();
   const last = msgs.find((m) => m.role === "assistant");
   if (!last) return "No response yet.";
-  // Strip markdown code fences for preview
   return last.content
     .replace(/```[\s\S]*?```/g, "[code block]")
     .replace(/#{1,6}\s/g, "")
@@ -83,66 +84,115 @@ export default function HistoryPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>("all");
   const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
 
-  // Load sessions from localStorage after mount
+  // Load sessions — merge Supabase (if logged in) with localStorage
   useEffect(() => {
     setMounted(true);
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.SESSIONS);
-      if (raw) {
-        const parsed: ChatSession[] = JSON.parse(raw);
-        const sorted = [...parsed].sort((a, b) => b.updatedAt - a.updatedAt);
-        setSessions(sorted);
+
+    async function loadSessions() {
+      // 1. Always load localStorage sessions first as a baseline
+      let localSessions: ChatSession[] = [];
+      try {
+        const raw = localStorage.getItem(STORAGE_KEYS.SESSIONS);
+        if (raw) {
+          localSessions = JSON.parse(raw) as ChatSession[];
+        }
+      } catch {
+        localSessions = [];
       }
-    } catch {
-      setSessions([]);
+
+      // 2. Try to get the current Supabase user
+      try {
+        const currentUser = await getCurrentUser();
+        setUser(currentUser);
+
+        if (currentUser) {
+          // 3. Fetch sessions from Supabase
+          const supabaseSessions = await getUserSessions(currentUser.id);
+
+          // 4. Merge: Supabase takes precedence; deduplicate by id
+          const supabaseMap = new Map<string, ChatSession>();
+          for (const s of supabaseSessions) {
+            supabaseMap.set(s.id, s);
+          }
+          // Add local sessions that aren't already in Supabase
+          for (const s of localSessions) {
+            if (!supabaseMap.has(s.id)) {
+              supabaseMap.set(s.id, s);
+            }
+          }
+
+          const merged = Array.from(supabaseMap.values()).sort(
+            (a, b) => b.updatedAt - a.updatedAt
+          );
+          setSessions(merged);
+          return;
+        }
+      } catch {
+        // Supabase unavailable — fall through to localStorage only
+      }
+
+      // 5. Fallback: localStorage only
+      const sorted = [...localSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+      setSessions(sorted);
     }
+
+    loadSessions();
   }, []);
 
   const handleDelete = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      // Remove from local state and localStorage
       const updated = sessions.filter((s) => s.id !== id);
       setSessions(updated);
       localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(updated));
       setDeleteConfirm(null);
+
+      // Also remove from Supabase if user is logged in
+      if (user) {
+        try {
+          await deleteSession(id, user.id);
+        } catch {
+          // Non-fatal — local state already updated
+        }
+      }
     },
-    [sessions]
+    [sessions, user]
   );
 
-  const handleClearAll = useCallback(() => {
+  const handleClearAll = useCallback(async () => {
     localStorage.removeItem(STORAGE_KEYS.SESSIONS);
     setSessions([]);
     setDeleteConfirm(null);
-  }, []);
+
+    // Also clear from Supabase if user is logged in
+    if (user) {
+      try {
+        await deleteAllSessions(user.id);
+      } catch {
+        // Non-fatal
+      }
+    }
+  }, [user]);
 
   // Filtered + searched sessions
   const filteredSessions = sessions.filter((s) => {
     const matchesFilter =
       filter === "all" ||
       (s.frameworks ?? []).some(
-        (fw) => fw.toLowerCase() === filter.toLowerCase()
+        (fw) => fw.toLowerCase() === filter || fw.toLowerCase() === "all"
       );
+    if (!matchesFilter) return false;
+
+    if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      !q ||
-      (s.title ?? "").toLowerCase().includes(q) ||
-      (s.url ?? "").toLowerCase().includes(q);
-    return matchesFilter && matchesSearch;
+    return (
+      s.title?.toLowerCase().includes(q) ||
+      s.url?.toLowerCase().includes(q) ||
+      s.messages?.some((m) => m.content.toLowerCase().includes(q))
+    );
   });
-
-  // Stats
-  const totalTestCases = sessions.reduce(
-    (acc, s) => acc + (s.testCaseCount ?? 0),
-    0
-  );
-  const totalExcelExports = sessions.filter((s) => s.excelExported).length;
-
-  const filterPills: { label: string; value: FilterType }[] = [
-    { label: "All", value: "all" },
-    { label: "Playwright", value: "playwright" },
-    { label: "Cypress", value: "cypress" },
-    { label: "Selenium", value: "selenium" },
-  ];
 
   if (!mounted) {
     return (
@@ -154,79 +204,39 @@ export default function HistoryPage() {
 
   return (
     <div className="min-h-screen py-10 px-4">
-      <div className="max-w-4xl mx-auto">
-        {/* ── Page Header ── */}
+      <div className="max-w-5xl mx-auto">
+        {/* ── Header ── */}
         <Reveal>
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 py-8">
+          <div className="mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <Clock className="w-5 h-5 text-[var(--accent)]" aria-hidden="true" />
-                <span className="text-xs font-mono text-[var(--muted-foreground)] uppercase tracking-widest">
-                  Session Archive
-                </span>
+                <h1 className="text-2xl font-bold text-[var(--foreground)] tracking-tight">
+                  Test History
+                </h1>
               </div>
-              <h1 className="text-3xl font-bold text-[var(--foreground)] tracking-tight">
-                Test History
-              </h1>
-              <p className="text-[var(--muted-foreground)] mt-1 text-sm">
-                Browse, resume, and manage all past QA agent sessions.
+              <p className="text-sm text-[var(--muted-foreground)]">
+                Browse and resume your past QA sessions
+                {user && (
+                  <span className="ml-2 text-[var(--accent)] text-xs font-mono">
+                    (synced with cloud)
+                  </span>
+                )}
               </p>
             </div>
             <Link
               href="/chat-home-main-agent-chat-interface"
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--primary)] hover:bg-[var(--primary-light)] text-white text-sm font-semibold transition-all duration-200 glow-primary shrink-0"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary)]/80 text-white text-sm font-medium transition-all duration-200 w-fit"
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
-              New Chat
+              New Session
             </Link>
           </div>
         </Reveal>
 
-        {/* ── Stats Row ── */}
+        {/* ── Search + Filter bar ── */}
         <Reveal delay={0.05}>
-          <div className="grid grid-cols-3 gap-3 mb-6">
-            {[
-              {
-                label: "Total Sessions",
-                value: sessions.length,
-                icon: MessageSquare,
-                color: "text-[var(--primary-light)]",
-              },
-              {
-                label: "Total Test Cases",
-                value: totalTestCases,
-                icon: CheckSquare,
-                color: "text-[var(--accent)]",
-              },
-              {
-                label: "Excel Exports",
-                value: totalExcelExports,
-                icon: FileText,
-                color: "text-emerald-400",
-              },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="glass rounded-xl p-4 flex flex-col gap-1 border border-[var(--border)]"
-              >
-                <stat.icon
-                  className={cn("w-4 h-4", stat.color)}
-                  aria-hidden="true"
-                />
-                <span className="text-2xl font-bold text-[var(--foreground)] tabular-nums">
-                  {stat.value}
-                </span>
-                <span className="text-xs text-[var(--muted-foreground)]">
-                  {stat.label}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Reveal>
-
-        {/* ── Search + Filter Bar ── */}
-        <Reveal delay={0.08}>
-          <div className="glass rounded-xl px-4 py-3 mb-6 border border-[var(--border)] flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3 mb-6">
             {/* Search */}
             <div className="relative flex-1">
               <Search
@@ -237,12 +247,12 @@ export default function HistoryPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by title or URL..."
-                className="w-full pl-9 pr-4 py-2 bg-transparent text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none"
-                aria-label="Search sessions"
+                placeholder="Search sessions..."
+                className="w-full pl-9 pr-4 py-2.5 rounded-lg glass border border-[var(--border)] text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]/60 transition-colors duration-200"
               />
               {searchQuery && (
                 <button
+                  type="button"
                   onClick={() => setSearchQuery("")}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
                   aria-label="Clear search"
@@ -252,52 +262,48 @@ export default function HistoryPage() {
               )}
             </div>
 
-            {/* Framework filter pills */}
+            {/* Framework filter */}
             <div className="flex items-center gap-1.5 flex-wrap">
-              {filterPills.map((pill) => (
-                <button
-                  key={pill.value}
-                  onClick={() => setFilter(pill.value)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200",
-                    filter === pill.value
-                      ? "bg-[var(--primary)] text-white"
-                      : "bg-white/5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/10"
-                  )}
-                >
-                  {pill.label}
-                </button>
-              ))}
+              {(["all", "playwright", "cypress", "selenium"] as FilterType[]).map(
+                (f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFilter(f)}
+                    className={cn(
+                      "px-3 py-2 rounded-lg text-xs font-medium capitalize transition-all duration-200 border",
+                      filter === f
+                        ? "bg-[var(--primary)]/20 text-[var(--primary-light)] border-[var(--primary)]/40"
+                        : "text-[var(--muted-foreground)] border-[var(--border)] hover:border-[var(--primary)]/30 hover:text-[var(--foreground)]"
+                    )}
+                  >
+                    {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                )
+              )}
             </div>
           </div>
         </Reveal>
 
-        {/* ── Session List ── */}
+        {/* ── Session list ── */}
         {filteredSessions.length === 0 ? (
           <Reveal delay={0.1}>
-            <div className="glass rounded-2xl border border-[var(--border)] p-16 flex flex-col items-center gap-4 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-[var(--primary)]/10 flex items-center justify-center">
-                <Clock className="w-7 h-7 text-[var(--primary-light)]" aria-hidden="true" />
+            <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+              <div className="w-16 h-16 rounded-2xl glass flex items-center justify-center border border-[var(--border)]">
+                <Bot className="w-8 h-8 text-[var(--muted-foreground)]" aria-hidden="true" />
               </div>
-              <div>
-                <p className="text-[var(--foreground)] font-semibold text-lg">
-                  {sessions.length === 0 ? "No sessions yet" : "No matching sessions"}
-                </p>
-                <p className="text-[var(--muted-foreground)] text-sm mt-1">
-                  {sessions.length === 0
-                    ? "Start a new chat to begin testing a website."
-                    : "Try adjusting your search or filter."}
-                </p>
-              </div>
-              {sessions.length === 0 && (
-                <Link
-                  href="/chat-home-main-agent-chat-interface"
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--primary)] hover:bg-[var(--primary-light)] text-white text-sm font-semibold transition-all duration-200 mt-2"
-                >
-                  <Plus className="w-4 h-4" aria-hidden="true" />
-                  Start New Chat
-                </Link>
-              )}
+              <p className="text-[var(--muted-foreground)] text-sm max-w-xs">
+                {searchQuery || filter !== "all"
+                  ? "No sessions match your search or filter."
+                  : "No sessions yet. Start a new chat to begin testing."}
+              </p>
+              <Link
+                href="/chat-home-main-agent-chat-interface"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--primary)]/20 hover:bg-[var(--primary)]/30 text-[var(--primary-light)] text-sm font-medium transition-all duration-200 border border-[var(--primary)]/30"
+              >
+                <Plus className="w-4 h-4" aria-hidden="true" />
+                Start New Session
+              </Link>
             </div>
           </Reveal>
         ) : (
@@ -305,188 +311,173 @@ export default function HistoryPage() {
             variants={staggerContainer}
             initial="hidden"
             animate="visible"
-            className="flex flex-col gap-4"
+            className="flex flex-col gap-3"
           >
             {filteredSessions.map((session) => {
               const stats = getSessionStats(session);
-              const domain = session.url ? extractDomain(session.url) : null;
               const preview = getLastAssistantPreview(session);
-              const isConfirmingDelete = deleteConfirm === session.id;
+              const isConfirming = deleteConfirm === session.id;
 
               return (
                 <motion.div
                   key={session.id}
                   variants={fadeInUp}
-                  className={cn(
-                    "glass rounded-xl p-5 border transition-all duration-200 cursor-pointer group",
-                    isConfirmingDelete
-                      ? "border-[var(--destructive)]/40"
-                      : "border-[var(--border)] hover:border-[var(--primary)]/40"
-                  )}
+                  className="glass rounded-xl border border-[var(--border)] hover:border-[var(--primary)]/30 transition-all duration-300 overflow-hidden group"
                 >
-                  {/* Card Header */}
-                  <div className="flex items-start justify-between gap-3 mb-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-[var(--primary)]/15 flex items-center justify-center shrink-0">
-                        <Globe
-                          className="w-4 h-4 text-[var(--primary-light)]"
-                          aria-hidden="true"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[var(--foreground)] truncate">
-                          {session.title || domain || "Untitled Session"}
-                        </p>
-                        {domain && session.title !== domain && (
-                          <p className="text-xs text-[var(--muted-foreground)] truncate">
-                            {domain}
-                          </p>
+                  <div className="p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      {/* Left: session info */}
+                      <div className="flex-1 min-w-0">
+                        {/* Title row */}
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <h2 className="text-sm font-semibold text-[var(--foreground)] truncate">
+                            {session.title || "Untitled Session"}
+                          </h2>
+                          {(session.frameworks ?? []).map((fw) => (
+                            <span
+                              key={fw}
+                              className={cn(
+                                "px-2 py-0.5 rounded-full text-[10px] font-medium capitalize",
+                                FRAMEWORK_COLORS[fw.toLowerCase()] ??
+                                  "bg-white/5 text-[var(--muted-foreground)] border border-[var(--border)]"
+                              )}
+                            >
+                              {fw}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* URL */}
+                        {session.url && (
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <Globe
+                              className="w-3 h-3 text-[var(--accent)] flex-shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span className="text-xs text-[var(--accent)] font-mono truncate">
+                              {extractDomain(session.url)}
+                            </span>
+                          </div>
                         )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Calendar
-                        className="w-3.5 h-3.5 text-[var(--muted-foreground)]"
-                        aria-hidden="true"
-                      />
-                      <span className="text-xs text-[var(--muted-foreground)] whitespace-nowrap">
-                        {formatRelativeTime(session.updatedAt)}
-                      </span>
-                    </div>
-                  </div>
 
-                  {/* Framework Badges */}
-                  {(session.frameworks ?? []).length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      {(session.frameworks ?? []).map((fw) => (
-                        <span
-                          key={fw}
-                          className={cn(
-                            "px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide",
-                            FRAMEWORK_COLORS[fw.toLowerCase()] ??
-                              "bg-white/5 text-[var(--muted-foreground)] border border-white/10"
+                        {/* Preview */}
+                        <p className="text-xs text-[var(--muted-foreground)] line-clamp-2 leading-relaxed mb-3">
+                          {preview}
+                        </p>
+
+                        {/* Stats row */}
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <div className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                            <MessageSquare className="w-3 h-3" aria-hidden="true" />
+                            <span>{stats.messageCount} messages</span>
+                          </div>
+                          {stats.testCaseCount > 0 && (
+                            <div className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                              <CheckSquare className="w-3 h-3" aria-hidden="true" />
+                              <span>{stats.testCaseCount} test cases</span>
+                            </div>
                           )}
-                        >
-                          {fw}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Stats Row */}
-                  <div className="flex items-center gap-4 mb-3">
-                    <div className="flex items-center gap-1.5">
-                      <MessageSquare
-                        className="w-3.5 h-3.5 text-[var(--muted-foreground)]"
-                        aria-hidden="true"
-                      />
-                      <span className="text-xs text-[var(--muted-foreground)]">
-                        {stats.messageCount} messages
-                      </span>
-                    </div>
-                    {stats.testCaseCount > 0 && (
-                      <div className="flex items-center gap-1.5">
-                        <CheckSquare
-                          className="w-3.5 h-3.5 text-[var(--accent)]"
-                          aria-hidden="true"
-                        />
-                        <span className="text-xs text-[var(--muted-foreground)]">
-                          {stats.testCaseCount} test cases
-                        </span>
-                      </div>
-                    )}
-                    {stats.excelExported && (
-                      <div className="flex items-center gap-1.5">
-                        <FileText
-                          className="w-3.5 h-3.5 text-emerald-400"
-                          aria-hidden="true"
-                        />
-                        <span className="text-xs text-emerald-400">Excel exported</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Last Message Preview */}
-                  {preview && (
-                    <p className="text-sm text-[var(--muted-foreground)] line-clamp-2 mb-4 leading-relaxed">
-                      {preview}
-                    </p>
-                  )}
-
-                  {/* Actions Row */}
-                  <AnimatePresence mode="wait">
-                    {isConfirmingDelete ? (
-                      <motion.div
-                        key="confirm"
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.15 }}
-                        className="flex items-center gap-3"
-                      >
-                        <div className="flex items-center gap-1.5 text-[var(--destructive)] text-xs">
-                          <AlertCircle className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Are you sure? This cannot be undone.</span>
+                          {stats.excelExported && (
+                            <div className="flex items-center gap-1 text-[10px] text-emerald-400">
+                              <FileText className="w-3 h-3" aria-hidden="true" />
+                              <span>Excel exported</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)]">
+                            <Calendar className="w-3 h-3" aria-hidden="true" />
+                            <span>{formatRelativeTime(session.updatedAt)}</span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 ml-auto">
+                      </div>
+
+                      {/* Right: actions */}
+                      <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                        {isConfirming ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-[var(--muted-foreground)]">
+                              Delete?
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(session.id)}
+                              className="px-2.5 py-1 rounded-md bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-all duration-200 border border-red-500/30"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirm(null)}
+                              className="px-2.5 py-1 rounded-md glass hover:bg-white/10 text-[var(--muted-foreground)] text-xs font-medium transition-all duration-200 border border-[var(--border)]"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
                           <button
-                            onClick={() => setDeleteConfirm(null)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/10 transition-all duration-200"
+                            type="button"
+                            onClick={() => setDeleteConfirm(session.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-[var(--muted-foreground)] hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
+                            aria-label="Delete session"
                           >
-                            Cancel
+                            <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                           </button>
-                          <button
-                            onClick={() => handleDelete(session.id)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--destructive)]/20 text-[var(--destructive)] hover:bg-[var(--destructive)]/30 border border-[var(--destructive)]/30 transition-all duration-200"
-                          >
-                            Confirm Delete
-                          </button>
-                        </div>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="actions"
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.15 }}
-                        className="flex items-center gap-2"
-                      >
+                        )}
+
                         <Link
-                          href="/chat-home-main-agent-chat-interface"
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[var(--primary)]/20 text-[var(--primary-light)] hover:bg-[var(--primary)]/30 border border-[var(--primary)]/30 transition-all duration-200"
+                          href={`/chat-home-main-agent-chat-interface?session=${session.id}`}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--primary)]/15 hover:bg-[var(--primary)]/25 text-[var(--primary-light)] text-xs font-medium transition-all duration-200 border border-[var(--primary)]/20"
                         >
-                          <Play className="w-3.5 h-3.5" aria-hidden="true" />
+                          <Play className="w-3 h-3" aria-hidden="true" />
                           Resume
+                          <ChevronRight className="w-3 h-3" aria-hidden="true" />
                         </Link>
-                        <button
-                          onClick={() => setDeleteConfirm(session.id)}
-                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[var(--destructive)]/10 text-[var(--destructive)] hover:bg-[var(--destructive)]/20 border border-[var(--destructive)]/20 transition-all duration-200 ml-auto"
-                          aria-label={`Delete session ${session.title}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                          Delete
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                      </div>
+                    </div>
+                  </div>
                 </motion.div>
               );
             })}
           </motion.div>
         )}
 
-        {/* ── Clear All ── */}
+        {/* ── Clear all ── */}
         {sessions.length > 0 && (
-          <Reveal delay={0.12}>
+          <Reveal delay={0.15}>
             <div className="mt-8 flex justify-center">
-              <button
-                onClick={handleClearAll}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--destructive)] hover:bg-[var(--destructive)]/10 border border-[var(--border)] hover:border-[var(--destructive)]/30 transition-all duration-200"
-              >
-                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                Clear All Sessions
-              </button>
+              {deleteConfirm === "__all__" ? (
+                <div className="flex items-center gap-3 p-4 rounded-xl glass border border-red-500/30">
+                  <AlertCircle
+                    className="w-4 h-4 text-red-400 flex-shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span className="text-sm text-[var(--muted-foreground)]">
+                    Delete all {sessions.length} sessions?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearAll}
+                    className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-all duration-200 border border-red-500/30"
+                  >
+                    Delete All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirm(null)}
+                    className="px-3 py-1.5 rounded-lg glass hover:bg-white/10 text-[var(--muted-foreground)] text-xs font-medium transition-all duration-200 border border-[var(--border)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirm("__all__")}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 transition-all duration-200"
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                  Clear All Sessions
+                </button>
+              )}
             </div>
           </Reveal>
         )}

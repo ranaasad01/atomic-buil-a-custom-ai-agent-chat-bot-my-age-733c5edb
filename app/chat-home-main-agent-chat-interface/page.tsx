@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Globe, Download, FileText, Sparkles, X, Check, AlertCircle, Clock, Terminal, Plus, Copy, Code2, ChevronDown, Loader2, Bot, User, Trash2, Edit3 } from 'lucide-react';
 import Link from "next/link";
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import {
   APP_NAME,
   DEFAULT_AGENT_PROMPT,
@@ -113,11 +114,7 @@ function parseMessageContent(content: string): ContentSegment[] {
     if (match.index > lastIndex) {
       segments.push({ type: "text", content: content.slice(lastIndex, match.index) });
     }
-    segments.push({
-      type: "code",
-      language: match[1] || "text",
-      content: match[2].trim(),
-    });
+    segments.push({ type: "code", language: match[1] || "text", content: match[2].trim() });
     lastIndex = match.index + match[0].length;
   }
 
@@ -125,60 +122,108 @@ function parseMessageContent(content: string): ContentSegment[] {
     segments.push({ type: "text", content: content.slice(lastIndex) });
   }
 
-  return segments.length > 0 ? segments : [{ type: "text", content }];
+  return segments.filter((s) => s.content.trim());
+}
+
+// ─── Supabase DB helpers (lazy-loaded to avoid breaking if not configured) ────
+
+async function tryGetCurrentUser(): Promise<SupabaseUser | null> {
+  try {
+    const { getCurrentUser } = await import('@/lib/supabase/db');
+    return await getCurrentUser();
+  } catch {
+    return null;
+  }
+}
+
+async function trySaveSession(userId: string, session: ChatSession): Promise<void> {
+  try {
+    const { saveSession } = await import('@/lib/supabase/db');
+    await saveSession(userId, session);
+  } catch {
+    // Silently fall back to localStorage only
+  }
+}
+
+async function tryGetUserSessions(userId: string): Promise<ChatSession[]> {
+  try {
+    const { getUserSessions } = await import('@/lib/supabase/db');
+    return await getUserSessions(userId);
+  } catch {
+    return [];
+  }
+}
+
+async function tryDeleteSession(sessionId: string, userId: string): Promise<void> {
+  try {
+    const { deleteSession } = await import('@/lib/supabase/db');
+    await deleteSession(sessionId, userId);
+  } catch {
+    // Silently fall back
+  }
+}
+
+async function tryDeleteAllSessions(userId: string): Promise<void> {
+  try {
+    const { deleteAllSessions } = await import('@/lib/supabase/db');
+    await deleteAllSessions(userId);
+  } catch {
+    // Silently fall back
+  }
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function CodeBlock({ code, language }: { code: string; language: string }) {
+function CodeBlock({ content, language }: { content: string; language: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // clipboard not available
+      // ignore
     }
-  }, [code]);
+  }, [content]);
 
   const handleDownload = useCallback(() => {
     const ext =
       language === "python" ? "py" : language === "typescript" ? "ts" : "js";
-    const blob = new Blob([code], { type: "text/plain" });
+    const blob = new Blob([content], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `test-script.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [code, language]);
+  }, [content, language]);
 
   return (
     <div className="code-block my-3 rounded-xl overflow-hidden border border-[var(--border)]">
-      <div className="flex items-center justify-between px-4 py-2 bg-[var(--card)] border-b border-[var(--border)]">
+      <div className="flex items-center justify-between px-4 py-2 bg-[#0d0d1a] border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
           <Code2 className="w-3.5 h-3.5 text-[var(--accent)]" />
           <span className="text-xs font-mono text-[var(--muted-foreground)]">
             {language || "code"}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={handleDownload}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
-            title="Download script"
+            className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors duration-200 px-2 py-1 rounded hover:bg-white/5"
           >
             <Download className="w-3 h-3" />
             <span>Download</span>
           </button>
           <button
+            type="button"
             onClick={handleCopy}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
+            className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors duration-200 px-2 py-1 rounded hover:bg-white/5"
           >
             {copied ? (
-              <><Check className="w-3 h-3 text-green-400" /><span className="text-green-400">Copied</span></>
+              <><Check className="w-3 h-3 text-emerald-400" /><span className="text-emerald-400">Copied!</span></>
             ) : (
               <><Copy className="w-3 h-3" /><span>Copy</span></>
             )}
@@ -186,428 +231,437 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         </div>
       </div>
       <pre className="p-4 overflow-x-auto text-xs leading-relaxed text-[var(--foreground)] font-mono">
-        <code>{code}</code>
+        <code>{content}</code>
       </pre>
     </div>
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
-  const segments = parseMessageContent(message.content);
+function MessageContent({ content }: { content: string }) {
+  const segments = parseMessageContent(content);
 
   return (
-    <motion.div
-      variants={fadeInUp}
-      initial="hidden"
-      animate="visible"
-      className={cn(
-        "flex gap-3 group",
-        isUser ? "flex-row-reverse" : "flex-row"
+    <div className="prose-dark">
+      {segments.map((seg, i) =>
+        seg.type === "code" ? (
+          <CodeBlock key={i} content={seg.content} language={seg.language ?? ""} />
+        ) : (
+          <div
+            key={i}
+            className="whitespace-pre-wrap text-sm leading-relaxed"
+            dangerouslySetInnerHTML={{
+              __html: seg.content
+                .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+                .replace(/\*(.+?)\*/g, "<em>$1</em>")
+                .replace(/^#{1,3}\s(.+)$/gm, "<h3 class='text-[var(--primary-light)] font-semibold mt-3 mb-1'>$1</h3>")
+                .replace(/^[-*]\s(.+)$/gm, "<li class='ml-4 list-disc'>$1</li>")
+                .replace(/^(\d+)\.\s(.+)$/gm, "<li class='ml-4 list-decimal'>$2</li>"),
+            }}
+          />
+        )
       )}
-    >
-      {/* Avatar */}
-      <div
-        className={cn(
-          "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white",
-          isUser
-            ? "bg-[var(--primary)]"
-            : "bg-gradient-to-br from-[var(--accent)]/30 to-[var(--primary)]/30 border border-[var(--border)]"
-        )}
-      >
-        {isUser ? (
-          <User className="w-4 h-4" />
-        ) : (
-          <Bot className="w-4 h-4 text-[var(--accent)]" />
-        )}
-      </div>
-
-      {/* Bubble */}
-      <div
-        className={cn(
-          "max-w-[80%] rounded-2xl px-4 py-3",
-          isUser
-            ? "bg-[var(--primary)]/20 border border-[var(--primary)]/30 text-[var(--foreground)]"
-            : "bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)]"
-        )}
-      >
-        {message.isStreaming && segments.length === 1 && segments[0].type === "text" && segments[0].content === "" ? (
-          <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span className="text-sm">Thinking...</span>
-          </div>
-        ) : (
-          <div className="prose-dark text-sm">
-            {segments.map((seg, i) =>
-              seg.type === "code" ? (
-                <CodeBlock key={i} code={seg.content} language={seg.language || ""} />
-              ) : (
-                <div
-                  key={i}
-                  className="whitespace-pre-wrap leading-relaxed"
-                  dangerouslySetInnerHTML={{
-                    __html: seg.content
-                      .replace(/&/g, "&amp;")
-                      .replace(/</g, "&lt;")
-                      .replace(/>/g, "&gt;")
-                      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-                      .replace(/\*(.+?)\*/g, "<em>$1</em>")
-                      .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold text-[var(--accent)] mt-3 mb-1">$1</h3>')
-                      .replace(/^## (.+)$/gm, '<h2 class="text-sm font-semibold text-[var(--primary-light)] mt-4 mb-1">$1</h2>')
-                      .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
-                      .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 list-decimal">$2</li>'),
-                  }}
-                />
-              )
-            )}
-            {message.isStreaming && (
-              <span className="streaming-cursor" aria-hidden="true" />
-            )}
-          </div>
-        )}
-        <div
-          className={cn(
-            "text-[10px] mt-1.5",
-            isUser
-              ? "text-[var(--primary-light)]/60 text-right"
-              : "text-[var(--muted-foreground)]/60"
-          )}
-        >
-          {formatTime(message.timestamp)}
-        </div>
-      </div>
-    </motion.div>
+    </div>
   );
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  // ── State ──
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [urlInput, setUrlInput] = useState("");
-  const [selectedFramework, setSelectedFramework] = useState<Framework>("all");
+  const [activeUrl, setActiveUrl] = useState("");
+  const [framework, setFramework] = useState<Framework>("all");
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("ready");
   const [apiKey, setApiKey] = useState("");
   const [agentPrompt, setAgentPrompt] = useState(DEFAULT_AGENT_PROMPT);
-  const [showEditPrompt, setShowEditPrompt] = useState(false);
-  const [editPromptDraft, setEditPromptDraft] = useState("");
-  const [promptSaved, setPromptSaved] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [showExampleDropdown, setShowExampleDropdown] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showApiModal, setShowApiModal] = useState(false);
+  const [editPromptDraft, setEditPromptDraft] = useState("");
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // ── Hydration guard ──
+  // ── Mount + load persisted state ───────────────────────────────────────────
   useEffect(() => {
     setMounted(true);
-  }, []);
 
-  // ── Load from localStorage ──
-  useEffect(() => {
-    if (!mounted) return;
+    // Load settings from localStorage
+    const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY) ?? "";
+    const storedPrompt = localStorage.getItem(STORAGE_KEYS.AGENT_PROMPT) ?? DEFAULT_AGENT_PROMPT;
+    setApiKey(storedKey);
+    setApiKeyDraft(storedKey);
+    setAgentPrompt(storedPrompt);
+    setEditPromptDraft(storedPrompt);
+
+    // Load sessions from localStorage first
+    let localSessions: ChatSession[] = [];
     try {
-      const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
-      if (storedKey) setApiKey(storedKey);
-      const storedPrompt = localStorage.getItem(STORAGE_KEYS.AGENT_PROMPT);
-      if (storedPrompt) setAgentPrompt(storedPrompt);
-      const storedSessions = localStorage.getItem(STORAGE_KEYS.SESSIONS);
-      if (storedSessions) {
-        const parsed = JSON.parse(storedSessions) as ChatSession[];
-        setSessions(parsed);
-        if (parsed.length > 0) setActiveSessionId(parsed[0].id);
+      const raw = localStorage.getItem(STORAGE_KEYS.SESSIONS);
+      if (raw) {
+        localSessions = JSON.parse(raw) as ChatSession[];
       }
     } catch {
-      // ignore
+      localSessions = [];
     }
-  }, [mounted]);
 
-  // ── Persist sessions ──
-  useEffect(() => {
-    if (!mounted) return;
-    try {
-      localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(sessions));
-    } catch {
-      // ignore
-    }
-  }, [sessions, mounted]);
+    // Then try to get current user and merge with Supabase sessions
+    tryGetCurrentUser().then(async (currentUser) => {
+      setUser(currentUser);
 
-  // ── Scroll to bottom ──
+      if (currentUser) {
+        const remoteSessions = await tryGetUserSessions(currentUser.id);
+
+        // Merge: prefer Supabase data, deduplicate by id
+        const mergedMap = new Map<string, ChatSession>();
+        for (const s of localSessions) {
+          mergedMap.set(s.id, s);
+        }
+        for (const s of remoteSessions) {
+          mergedMap.set(s.id, s); // Supabase wins on conflict
+        }
+        const merged = Array.from(mergedMap.values()).sort(
+          (a, b) => b.updatedAt - a.updatedAt
+        );
+        setSessions(merged);
+        // Sync merged back to localStorage
+        localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(merged));
+      } else {
+        setSessions(localSessions.sort((a, b) => b.updatedAt - a.updatedAt));
+      }
+    });
+  }, []);
+
+  // ── Auto-scroll ────────────────────────────────────────────────────────────
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [sessions, activeSessionId]);
+  }, [messages]);
 
-  // ── Active session ──
-  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
-
-  // ── New session ──
-  const createNewSession = useCallback(() => {
-    const session: ChatSession = {
-      id: uid(),
-      title: "New Session",
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setSessions((prev) => [session, ...prev]);
-    setActiveSessionId(session.id);
-    setUrlInput("");
-    setInput("");
-  }, []);
-
-  // ── Delete session ──
-  const deleteSession = useCallback(
-    (id: string) => {
-      setSessions((prev) => prev.filter((s) => s.id !== id));
-      if (activeSessionId === id) {
-        setActiveSessionId(null);
-      }
+  // ── Persist sessions to localStorage (and Supabase if user exists) ─────────
+  const persistSessions = useCallback(
+    async (updated: ChatSession[]) => {
+      localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(updated));
     },
-    [activeSessionId]
+    []
   );
 
-  // ── Export Excel ──
-  const exportExcel = useCallback(async () => {
-    if (!activeSession) return;
-    try {
-      const { utils, writeFile } = await import("xlsx");
-      const testCases = [
-        [
-          "Test ID",
-          "Test Suite",
-          "Description",
-          "Preconditions",
-          "Steps",
-          "Expected Result",
-          "Actual Result",
-          "Status",
-          "Priority",
-          "Assigned To",
-        ],
-        [
-          "TC-001",
-          "Smoke",
-          "Verify page loads",
-          "Browser open",
-          "1. Navigate to URL\n2. Wait for load",
-          "Page loads within 3s",
-          "",
-          "Pending",
-          "High",
-          "",
-        ],
-      ];
-      const ws = utils.aoa_to_sheet(testCases);
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, "Test Cases");
-      writeFile(wb, `test-cases-${Date.now()}.xlsx`);
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === activeSession.id ? { ...s, excelExported: true } : s
-        )
-      );
-    } catch (err) {
-      console.error("Excel export failed:", err);
-    }
-  }, [activeSession]);
+  // ── Session helpers ────────────────────────────────────────────────────────
+  const saveCurrentSession = useCallback(
+    async (msgs: ChatMessage[], sessionId: string | null = activeSessionId) => {
+      if (!msgs.length) return;
 
-  // ── Send message ──
-  const sendMessage = useCallback(
-    async (overrideContent?: string) => {
-      const content = overrideContent ?? input.trim();
-      if (!content || agentStatus === "thinking") return;
+      const now = Date.now();
+      const title =
+        msgs[0]?.content?.slice(0, 60) ||
+        (activeUrl ? `Test: ${activeUrl}` : "New Session");
 
-      let sessionId = activeSessionId;
-      let currentSession: ChatSession;
+      setSessions((prev) => {
+        const existing = prev.find((s) => s.id === sessionId);
+        const session: ChatSession = existing
+          ? {
+              ...existing,
+              messages: msgs,
+              updatedAt: now,
+              title: existing.title || title,
+              url: activeUrl || existing.url,
+              frameworks: [framework],
+            }
+          : {
+              id: sessionId ?? uid(),
+              title,
+              url: activeUrl,
+              messages: msgs,
+              createdAt: now,
+              updatedAt: now,
+              frameworks: [framework],
+              testCaseCount: 0,
+              excelExported: false,
+              agentPromptSnapshot: agentPrompt,
+            };
 
-      if (!sessionId) {
-        const newSession: ChatSession = {
-          id: uid(),
-          title: content.slice(0, 40),
-          messages: [],
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          url: urlInput || undefined,
-          frameworks: [selectedFramework],
-        };
-        setSessions((prev) => [newSession, ...prev]);
-        setActiveSessionId(newSession.id);
-        sessionId = newSession.id;
-        currentSession = newSession;
-      } else {
-        currentSession = sessions.find((s) => s.id === sessionId)!;
+        const updated = existing
+          ? prev.map((s) => (s.id === session.id ? session : s))
+          : [session, ...prev];
+
+        // Persist to localStorage
+        localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(updated));
+
+        // Persist to Supabase if user is logged in
+        if (user) {
+          trySaveSession(user.id, session);
+        }
+
+        return updated;
+      });
+    },
+    [activeSessionId, activeUrl, framework, agentPrompt, user]
+  );
+
+  const startNewSession = useCallback(() => {
+    const id = uid();
+    setActiveSessionId(id);
+    setMessages([]);
+    setUrlInput("");
+    setActiveUrl("");
+    setInput("");
+    setAgentStatus("ready");
+    abortRef.current?.abort();
+  }, []);
+
+  const loadSession = useCallback((session: ChatSession) => {
+    setActiveSessionId(session.id);
+    setMessages(session.messages ?? []);
+    setActiveUrl(session.url ?? "");
+    setUrlInput(session.url ?? "");
+    setFramework((session.frameworks?.[0] as Framework) ?? "all");
+    setAgentStatus("ready");
+  }, []);
+
+  const deleteSession = useCallback(
+    async (id: string) => {
+      setSessions((prev) => {
+        const updated = prev.filter((s) => s.id !== id);
+        localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(updated));
+        return updated;
+      });
+
+      // Delete from Supabase if user is logged in
+      if (user) {
+        await tryDeleteSession(id, user.id);
       }
 
-      const urlContext =
-        urlInput && isValidUrl(urlInput)
-          ? `\n\n[Target URL: ${normalizeUrl(urlInput)}]\n[Framework: ${selectedFramework}]`
-          : "";
+      if (activeSessionId === id) {
+        startNewSession();
+      }
+      setDeleteConfirm(null);
+    },
+    [activeSessionId, startNewSession, user]
+  );
+
+  const clearAllSessions = useCallback(async () => {
+    localStorage.removeItem(STORAGE_KEYS.SESSIONS);
+    setSessions([]);
+
+    // Delete all from Supabase if user is logged in
+    if (user) {
+      await tryDeleteAllSessions(user.id);
+    }
+
+    startNewSession();
+  }, [startNewSession, user]);
+
+  // ── Send message ───────────────────────────────────────────────────────────
+  const sendMessage = useCallback(
+    async (overrideContent?: string) => {
+      const content = (overrideContent ?? input).trim();
+      if (!content || agentStatus === "thinking") return;
+
+      const resolvedUrl = activeUrl || (isValidUrl(urlInput) ? normalizeUrl(urlInput) : "");
+      if (resolvedUrl && !activeUrl) setActiveUrl(resolvedUrl);
 
       const userMsg: ChatMessage = {
         id: uid(),
         role: "user",
-        content: content + urlContext,
+        content,
         timestamp: Date.now(),
       };
 
+      const assistantId = uid();
       const assistantMsg: ChatMessage = {
-        id: uid(),
+        id: assistantId,
         role: "assistant",
         content: "",
         timestamp: Date.now(),
         isStreaming: true,
       };
 
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === sessionId
-            ? {
-                ...s,
-                messages: [...s.messages, userMsg, assistantMsg],
-                updatedAt: Date.now(),
-                title:
-                  s.messages.length === 0
-                    ? content.slice(0, 40)
-                    : s.title,
-              }
-            : s
-        )
-      );
-
+      const newMessages = [...messages, userMsg, assistantMsg];
+      setMessages(newMessages);
       setInput("");
       setAgentStatus("thinking");
 
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
+      const sessionId = activeSessionId ?? uid();
+      if (!activeSessionId) setActiveSessionId(sessionId);
+
+      abortRef.current = new AbortController();
 
       try {
-        const allMessages = [
-          ...currentSession.messages,
-          userMsg,
-        ].map((m) => ({ role: m.role, content: m.content }));
+        const systemPrompt = `${agentPrompt}\n\n${resolvedUrl ? `The user is testing this URL: ${resolvedUrl}` : ""}\nPreferred framework: ${framework}`;
 
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: ctrl.signal,
           body: JSON.stringify({
-            messages: allMessages,
-            systemPrompt: agentPrompt,
+            messages: [...messages, userMsg].map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            systemPrompt,
             apiKey: apiKey || undefined,
           }),
+          signal: abortRef.current.signal,
         });
 
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: "Unknown error" }));
-          throw new Error(errData.error || `HTTP ${res.status}`);
+          throw new Error(`API error: ${res.status}`);
         }
 
-        const reader = res.body!.getReader();
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
         const decoder = new TextDecoder();
         let accumulated = "";
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          accumulated += decoder.decode(value, { stream: true });
-          const finalAccumulated = accumulated;
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.id === sessionId
-                ? {
-                    ...s,
-                    messages: s.messages.map((m) =>
-                      m.id === assistantMsg.id
-                        ? { ...m, content: finalAccumulated, isStreaming: true }
-                        : m
-                    ),
-                  }
-                : s
-            )
-          );
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6).trim();
+              if (data === "[DONE]") break;
+              try {
+                const parsed = JSON.parse(data);
+                const delta =
+                  parsed.delta?.text ||
+                  parsed.choices?.[0]?.delta?.content ||
+                  "";
+                accumulated += delta;
+
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, content: accumulated, isStreaming: true }
+                      : m
+                  )
+                );
+              } catch {
+                // skip malformed SSE lines
+              }
+            }
+          }
         }
 
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === sessionId
-              ? {
-                  ...s,
-                  messages: s.messages.map((m) =>
-                    m.id === assistantMsg.id
-                      ? { ...m, isStreaming: false }
-                      : m
-                  ),
-                  updatedAt: Date.now(),
-                }
-              : s
-          )
+        const finalMessages = newMessages.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: accumulated, isStreaming: false }
+            : m
         );
+        setMessages(finalMessages);
         setAgentStatus("ready");
-      } catch (err: unknown) {
+        await saveCurrentSession(finalMessages, sessionId);
+      } catch (err) {
         if ((err as Error).name === "AbortError") {
           setAgentStatus("ready");
           return;
         }
-        const message = err instanceof Error ? err.message : "Unknown error";
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === sessionId
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
               ? {
-                  ...s,
-                  messages: s.messages.map((m) =>
-                    m.id === assistantMsg.id
-                      ? {
-                          ...m,
-                          content: `Error: ${message}`,
-                          isStreaming: false,
-                        }
-                      : m
-                  ),
+                  ...m,
+                  content: "Sorry, something went wrong. Please check your API key and try again.",
+                  isStreaming: false,
                 }
-              : s
+              : m
           )
         );
         setAgentStatus("error");
-        setTimeout(() => setAgentStatus("ready"), 3000);
       }
     },
-    [input, activeSessionId, sessions, agentStatus, urlInput, selectedFramework, agentPrompt, apiKey]
+    [input, agentStatus, activeUrl, urlInput, messages, activeSessionId, agentPrompt, framework, apiKey, saveCurrentSession]
   );
 
-  // ── Keyboard handler ──
+  // ── Export Excel ───────────────────────────────────────────────────────────
+  const exportExcel = useCallback(async () => {
+    if (!messages.length) return;
+    setIsExporting(true);
+    try {
+      const { utils, writeFile } = await import("xlsx");
+      const testCases = [
+        ["Test ID", "Test Suite", "Description", "Preconditions", "Steps", "Expected Result", "Actual Result", "Status", "Priority", "Assigned To"],
+        ["TC-001", "Smoke", "Verify page loads", "App is running", "1. Navigate to URL", "Page loads successfully", "", "Pending", "High", ""],
+      ];
+      const ws = utils.aoa_to_sheet(testCases);
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, "Test Cases");
+      writeFile(wb, `test-cases-${Date.now()}.xlsx`);
+
+      // Mark session as exported
+      setSessions((prev) => {
+        const updated = prev.map((s) =>
+          s.id === activeSessionId ? { ...s, excelExported: true } : s
+        );
+        localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(updated));
+        return updated;
+      });
+    } catch (err) {
+      console.error("Excel export failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [messages, activeSessionId]);
+
+  // ── Save agent prompt ──────────────────────────────────────────────────────
+  const saveAgentPrompt = useCallback(() => {
+    setAgentPrompt(editPromptDraft);
+    localStorage.setItem(STORAGE_KEYS.AGENT_PROMPT, editPromptDraft);
+    setSaveStatus("saved");
+    setTimeout(() => {
+      setSaveStatus("idle");
+      setShowEditModal(false);
+    }, 1200);
+  }, [editPromptDraft]);
+
+  // ── Save API key ───────────────────────────────────────────────────────────
+  const saveApiKey = useCallback(() => {
+    setApiKey(apiKeyDraft);
+    localStorage.setItem(STORAGE_KEYS.API_KEY, apiKeyDraft);
+    setSaveStatus("saved");
+    setTimeout(() => {
+      setSaveStatus("idle");
+      setShowApiModal(false);
+    }, 1200);
+  }, [apiKeyDraft]);
+
+  // ── Keyboard handler ───────────────────────────────────────────────────────
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        void sendMessage();
+        sendMessage();
       }
     },
     [sendMessage]
   );
 
-  // ── Save prompt ──
-  const savePrompt = useCallback(() => {
-    setAgentPrompt(editPromptDraft);
-    try {
-      localStorage.setItem(STORAGE_KEYS.AGENT_PROMPT, editPromptDraft);
-    } catch {
-      // ignore
-    }
-    setPromptSaved(true);
-    setTimeout(() => {
-      setPromptSaved(false);
-      setShowEditPrompt(false);
-    }, 1200);
-  }, [editPromptDraft]);
+  // ── Guard: don't render until mounted (avoid hydration mismatch) ───────────
+  if (!mounted) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
+        <Loader2 className="w-6 h-6 text-[var(--accent)] animate-spin" />
+      </div>
+    );
+  }
 
-  if (!mounted) return null;
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
       {/* ── Sidebar ── */}
@@ -616,299 +670,466 @@ export default function ChatPage() {
           <motion.aside
             key="sidebar"
             initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 260, opacity: 1 }}
+            animate={{ width: 280, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeInOut" }}
-            className="flex-shrink-0 overflow-hidden border-r border-[var(--border)] bg-[var(--card)]/60 backdrop-blur-sm flex flex-col"
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="flex-shrink-0 overflow-hidden border-r border-[var(--border)] bg-[var(--card)]/60 backdrop-blur-xl flex flex-col"
           >
-            <div className="p-3 border-b border-[var(--border)] flex items-center justify-between">
-              <span className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-widest">
-                Sessions
-              </span>
-              <button
-                onClick={createNewSession}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-[var(--primary)]/20 text-[var(--primary-light)] hover:bg-[var(--primary)]/30 transition-all duration-200"
-              >
-                <Plus className="w-3 h-3" />
-                New
-              </button>
-            </div>
+            <div className="flex flex-col h-full w-[280px]">
+              {/* Sidebar header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+                <span className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-widest">
+                  Sessions
+                </span>
+                <button
+                  type="button"
+                  onClick={startNewSession}
+                  className="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--foreground)] transition-colors duration-200 px-2 py-1 rounded hover:bg-white/5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  New
+                </button>
+              </div>
 
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {sessions.length === 0 ? (
-                <div className="text-center py-8 text-[var(--muted-foreground)] text-xs">
-                  No sessions yet
-                </div>
-              ) : (
-                sessions.map((session) => (
-                  <button
+              {/* Session list */}
+              <div className="flex-1 overflow-y-auto py-2 px-2 space-y-1">
+                {sessions.length === 0 && (
+                  <div className="text-center py-8 text-xs text-[var(--muted-foreground)]">
+                    No sessions yet.
+                    <br />
+                    Start a new chat!
+                  </div>
+                )}
+                {sessions.map((session) => (
+                  <div
                     key={session.id}
-                    onClick={() => setActiveSessionId(session.id)}
                     className={cn(
-                      "w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 group relative",
-                      activeSessionId === session.id
+                      "group relative rounded-lg px-3 py-2.5 cursor-pointer transition-all duration-200",
+                      session.id === activeSessionId
                         ? "bg-[var(--primary)]/20 border border-[var(--primary)]/30"
                         : "hover:bg-white/5 border border-transparent"
                     )}
+                    onClick={() => loadSession(session)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === "Enter" && loadSession(session)}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-[var(--foreground)] truncate">
-                          {session.title}
+                          {session.title || "Untitled Session"}
                         </p>
-                        <p className="text-[10px] text-[var(--muted-foreground)] mt-0.5">
+                        {session.url && (
+                          <p className="text-[10px] text-[var(--muted-foreground)] truncate mt-0.5">
+                            {session.url}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-[var(--muted-foreground)]/60 mt-1">
                           {formatRelativeTime(session.updatedAt)}
                         </p>
                       </div>
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          deleteSession(session.id);
+                          setDeleteConfirm(session.id);
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded text-[var(--muted-foreground)] hover:text-red-400 transition-all duration-200"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--destructive)] transition-all duration-200"
                         aria-label="Delete session"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
                     </div>
-                    {session.url && (
-                      <p className="text-[10px] text-[var(--accent)]/70 truncate mt-0.5">
-                        {session.url}
-                      </p>
-                    )}
-                  </button>
-                ))
-              )}
-            </div>
+                  </div>
+                ))}
+              </div>
 
-            {/* Edit Agent Prompt */}
-            <div className="p-3 border-t border-[var(--border)]">
-              <button
-                onClick={() => {
-                  setEditPromptDraft(agentPrompt);
-                  setShowEditPrompt(true);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200 border border-[var(--border)]"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                Edit Agent Prompt
-              </button>
+              {/* Sidebar footer */}
+              <div className="border-t border-[var(--border)] p-3 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditPromptDraft(agentPrompt);
+                    setShowEditModal(true);
+                  }}
+                  className="w-full flex items-center gap-2 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors duration-200 px-2 py-1.5 rounded hover:bg-white/5"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Edit Agent Prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiKeyDraft(apiKey);
+                    setShowApiModal(true);
+                  }}
+                  className="w-full flex items-center gap-2 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors duration-200 px-2 py-1.5 rounded hover:bg-white/5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {apiKey ? "Update API Key" : "Set API Key"}
+                </button>
+                {sessions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirm("__all__")}
+                    className="w-full flex items-center gap-2 text-xs text-[var(--destructive)]/70 hover:text-[var(--destructive)] transition-colors duration-200 px-2 py-1.5 rounded hover:bg-[var(--destructive)]/5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Clear All Sessions
+                  </button>
+                )}
+              </div>
             </div>
           </motion.aside>
         )}
       </AnimatePresence>
 
-      {/* ── Main Chat Area ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top bar */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--card)]/40 backdrop-blur-sm flex-shrink-0">
+      {/* ── Main chat area ── */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Chat header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--card)]/40 backdrop-blur-xl flex-shrink-0">
           <button
+            type="button"
             onClick={() => setSidebarOpen((v) => !v)}
             className="p-1.5 rounded-md text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
-            aria-label="Toggle sidebar"
+            aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
           >
-            <Terminal className="w-4 h-4" />
+            <ChevronDown
+              className={cn(
+                "w-4 h-4 transition-transform duration-200",
+                sidebarOpen ? "-rotate-90" : "rotate-90"
+              )}
+            />
           </button>
 
-          {/* URL input */}
-          <div className="flex-1 flex items-center gap-2 bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-1.5 focus-within:border-[var(--accent)]/50 transition-colors duration-200">
-            <Globe className="w-3.5 h-3.5 text-[var(--accent)] flex-shrink-0" />
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="w-6 h-6 rounded-md bg-[var(--primary)] flex items-center justify-center flex-shrink-0">
+              <Bot className="w-3.5 h-3.5 text-white" />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-semibold text-[var(--foreground)] truncate">
+                {activeSession?.title || APP_NAME}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full flex-shrink-0",
+                    agentStatus === "ready" && "bg-emerald-400",
+                    agentStatus === "thinking" && "bg-[var(--accent)] animate-pulse",
+                    agentStatus === "error" && "bg-[var(--destructive)]"
+                  )}
+                />
+                <span className="text-[10px] text-[var(--muted-foreground)]">
+                  {agentStatus === "ready" && "Ready"}
+                  {agentStatus === "thinking" && "Analyzing..."}
+                  {agentStatus === "error" && "Error"}
+                </span>
+                {user && (
+                  <span className="text-[10px] text-[var(--accent)]/70 ml-2">
+                    Synced
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={exportExcel}
+                disabled={isExporting}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all duration-200 disabled:opacity-50"
+              >
+                {isExporting ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <FileText className="w-3 h-3" />
+                )}
+                Export Excel
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={startNewSession}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[var(--primary)]/10 text-[var(--primary-light)] border border-[var(--primary)]/20 hover:bg-[var(--primary)]/20 transition-all duration-200"
+            >
+              <Plus className="w-3 h-3" />
+              New Chat
+            </button>
+          </div>
+        </div>
+
+        {/* URL bar */}
+        <div className="px-4 py-2.5 border-b border-[var(--border)] bg-[var(--card)]/20 flex-shrink-0">
+          <div className="flex items-center gap-2 max-w-3xl mx-auto">
+            <Globe className="w-4 h-4 text-[var(--muted-foreground)] flex-shrink-0" />
             <input
               type="url"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="https://example.com — paste URL to test"
-              className="flex-1 bg-transparent text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] outline-none min-w-0"
+              onBlur={() => {
+                if (isValidUrl(urlInput)) setActiveUrl(normalizeUrl(urlInput));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && isValidUrl(urlInput)) {
+                  setActiveUrl(normalizeUrl(urlInput));
+                }
+              }}
+              placeholder="https://example.com — paste a URL to test"
+              className="flex-1 bg-transparent text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 outline-none font-mono"
             />
-            {urlInput && isValidUrl(urlInput) && (
-              <Check className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+            {activeUrl && (
+              <span className="text-[10px] text-emerald-400 flex items-center gap-1 flex-shrink-0">
+                <Check className="w-3 h-3" />
+                Active
+              </span>
             )}
           </div>
+        </div>
 
-          {/* Framework selector */}
-          <div className="flex items-center gap-1">
-            {FRAMEWORKS.map((fw) => (
-              <button
-                key={fw.value}
-                onClick={() => setSelectedFramework(fw.value)}
-                className={cn(
-                  "px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-200",
-                  selectedFramework === fw.value
-                    ? "bg-[var(--primary)]/30 text-[var(--primary-light)] border border-[var(--primary)]/40"
-                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 border border-transparent"
-                )}
-              >
-                {fw.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Status indicator */}
-          <div className="flex items-center gap-1.5">
-            <div
-              className={cn(
-                "w-2 h-2 rounded-full",
-                agentStatus === "ready" && "bg-green-400",
-                agentStatus === "thinking" && "bg-[var(--accent)] animate-pulse",
-                agentStatus === "error" && "bg-red-400"
-              )}
-            />
-            <span className="text-xs text-[var(--muted-foreground)] hidden sm:block">
-              {agentStatus === "ready" && "Ready"}
-              {agentStatus === "thinking" && "Thinking..."}
-              {agentStatus === "error" && "Error"}
+        {/* Framework selector */}
+        <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--card)]/10 flex-shrink-0">
+          <div className="flex items-center gap-2 max-w-3xl mx-auto">
+            <Terminal className="w-3.5 h-3.5 text-[var(--muted-foreground)] flex-shrink-0" />
+            <span className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-widest mr-1">
+              Framework:
             </span>
+            <div className="flex items-center gap-1">
+              {FRAMEWORKS.map((fw) => (
+                <button
+                  key={fw.value}
+                  type="button"
+                  onClick={() => setFramework(fw.value)}
+                  className={cn(
+                    "text-[10px] px-2.5 py-1 rounded-full border transition-all duration-200",
+                    framework === fw.value
+                      ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10"
+                      : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--accent)]/40 hover:text-[var(--foreground)]"
+                  )}
+                >
+                  {fw.label}
+                </button>
+              ))}
+            </div>
           </div>
-
-          {/* Export Excel */}
-          {activeSession && activeSession.messages.length > 0 && (
-            <button
-              onClick={exportExcel}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-green-500/15 text-green-400 border border-green-500/25 hover:bg-green-500/25 transition-all duration-200"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span className="hidden sm:block">Export Excel</span>
-            </button>
-          )}
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {!activeSession || activeSession.messages.length === 0 ? (
-            <motion.div
-              variants={scaleIn}
-              initial="hidden"
-              animate="visible"
-              className="flex flex-col items-center justify-center h-full gap-6 text-center"
-            >
-              <div className="relative">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--primary)]/30 to-[var(--accent)]/20 border border-[var(--border)] flex items-center justify-center">
-                  <Sparkles className="w-8 h-8 text-[var(--accent)]" />
+        <div className="flex-1 overflow-y-auto px-4 py-6">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {messages.length === 0 && (
+              <motion.div
+                variants={fadeInUp}
+                initial="hidden"
+                animate="visible"
+                className="text-center py-16"
+              >
+                <div className="w-16 h-16 rounded-2xl bg-[var(--primary)]/20 border border-[var(--primary)]/30 flex items-center justify-center mx-auto mb-4">
+                  <Sparkles className="w-8 h-8 text-[var(--primary-light)]" />
                 </div>
-                <div className="absolute -inset-2 rounded-2xl bg-[var(--primary)] opacity-10 blur-xl" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-[var(--foreground)] mb-1">
+                <h2 className="text-xl font-semibold text-[var(--foreground)] mb-2">
                   {APP_NAME}
                 </h2>
-                <p className="text-sm text-[var(--muted-foreground)] max-w-sm">
-                  Paste a URL above and describe what to test. I&apos;ll generate test cases, automation scripts, and Excel sheets.
+                <p className="text-sm text-[var(--muted-foreground)] mb-8 max-w-md mx-auto">
+                  Paste a URL above and describe what you want to test. The agent will analyze the site and generate test scripts.
                 </p>
-              </div>
-
-              {/* Example prompts */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowExampleDropdown((v) => !v)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--border)] text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--accent)]/40 transition-all duration-200"
-                >
-                  <span>Try an example</span>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
-                <AnimatePresence>
-                  {showExampleDropdown && (
-                    <motion.div
-                      variants={scaleIn}
-                      initial="hidden"
-                      animate="visible"
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="absolute top-full mt-2 left-0 right-0 bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden shadow-xl z-10"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg mx-auto">
+                  {EXAMPLE_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => sendMessage(prompt)}
+                      className="text-left text-xs px-3 py-2.5 rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--accent)]/40 hover:bg-white/5 transition-all duration-200"
                     >
-                      {EXAMPLE_PROMPTS.map((prompt, i) => (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            setShowExampleDropdown(false);
-                            void sendMessage(prompt);
-                          }}
-                          className="w-full text-left px-4 py-2.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200 border-b border-[var(--border)] last:border-0"
-                        >
-                          {prompt}
-                        </button>
-                      ))}
-                    </motion.div>
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {messages.map((msg) => (
+              <motion.div
+                key={msg.id}
+                variants={fadeInUp}
+                initial="hidden"
+                animate="visible"
+                className={cn(
+                  "flex gap-3",
+                  msg.role === "user" ? "justify-end" : "justify-start"
+                )}
+              >
+                {msg.role === "assistant" && (
+                  <div className="w-7 h-7 rounded-lg bg-[var(--primary)]/20 border border-[var(--primary)]/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Bot className="w-4 h-4 text-[var(--primary-light)]" />
+                  </div>
+                )}
+
+                <div
+                  className={cn(
+                    "max-w-[85%] rounded-2xl px-4 py-3",
+                    msg.role === "user"
+                      ? "bg-[var(--primary)]/20 border border-[var(--primary)]/30 text-[var(--foreground)]"
+                      : "bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)]"
                   )}
-                </AnimatePresence>
-              </div>
-            </motion.div>
-          ) : (
-            <>
-              {activeSession.messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} />
-              ))}
-              <div ref={messagesEndRef} />
-            </>
-          )}
+                >
+                  {msg.role === "user" ? (
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  ) : (
+                    <>
+                      <MessageContent content={msg.content} />
+                      {msg.isStreaming && (
+                        <span className="streaming-cursor" aria-hidden="true" />
+                      )}
+                    </>
+                  )}
+                  <p className="text-[10px] text-[var(--muted-foreground)]/50 mt-2 text-right">
+                    {formatTime(msg.timestamp)}
+                  </p>
+                </div>
+
+                {msg.role === "user" && (
+                  <div className="w-7 h-7 rounded-lg bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <User className="w-4 h-4 text-[var(--accent)]" />
+                  </div>
+                )}
+              </motion.div>
+            ))}
+
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Input area */}
-        <div className="flex-shrink-0 p-4 border-t border-[var(--border)] bg-[var(--card)]/40 backdrop-blur-sm">
-          <div className="flex items-end gap-3">
-            <div className="flex-1 bg-[var(--card)] border border-[var(--border)] rounded-xl focus-within:border-[var(--accent)]/50 transition-colors duration-200 overflow-hidden">
+        <div className="px-4 py-4 border-t border-[var(--border)] bg-[var(--card)]/40 backdrop-blur-xl flex-shrink-0">
+          <div className="max-w-3xl mx-auto">
+            <div className="relative flex items-end gap-3 bg-[var(--card)] border border-[var(--border)] rounded-2xl px-4 py-3 focus-within:border-[var(--accent)]/50 transition-colors duration-200">
               <textarea
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Describe what to test, or ask for specific scripts..."
+                placeholder="Describe what to test, or ask a QA question..."
                 rows={1}
-                className="w-full bg-transparent px-4 py-3 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] outline-none resize-none leading-relaxed"
-                style={{ maxHeight: "120px", overflowY: "auto" }}
+                className="flex-1 bg-transparent text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/50 outline-none resize-none max-h-32 leading-relaxed"
+                style={{ minHeight: "24px" }}
                 disabled={agentStatus === "thinking"}
               />
+              <button
+                type="button"
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || agentStatus === "thinking"}
+                className={cn(
+                  "flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200",
+                  input.trim() && agentStatus !== "thinking"
+                    ? "bg-[var(--accent)] text-[var(--background)] hover:opacity-90 glow-accent"
+                    : "bg-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"
+                )}
+                aria-label="Send message"
+              >
+                {agentStatus === "thinking" ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </button>
             </div>
-            <button
-              onClick={() => void sendMessage()}
-              disabled={!input.trim() || agentStatus === "thinking"}
-              className={cn(
-                "flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200",
-                input.trim() && agentStatus !== "thinking"
-                  ? "bg-[var(--primary)] hover:bg-[var(--primary)]/80 text-white glow-primary"
-                  : "bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] cursor-not-allowed"
-              )}
-              aria-label="Send message"
-            >
-              {agentStatus === "thinking" ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-            </button>
+            <p className="text-[10px] text-[var(--muted-foreground)]/40 text-center mt-2">
+              Press Enter to send, Shift+Enter for new line
+            </p>
           </div>
-          <p className="text-[10px] text-[var(--muted-foreground)]/50 mt-2 text-center">
-            Press Enter to send, Shift+Enter for new line
-          </p>
         </div>
       </div>
 
-      {/* ── Edit Agent Prompt Modal ── */}
+      {/* ── Delete confirm modal ── */}
       <AnimatePresence>
-        {showEditPrompt && (
-          <>
-            <motion.div
-              variants={modalOverlay}
-              initial="hidden"
-              animate="visible"
-              exit="hidden"
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
-              onClick={() => setShowEditPrompt(false)}
-            />
+        {deleteConfirm && (
+          <motion.div
+            variants={modalOverlay}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+            onClick={() => setDeleteConfirm(null)}
+          >
             <motion.div
               variants={modalContent}
               initial="hidden"
               animate="visible"
               exit="hidden"
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-2xl mx-auto bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl z-50 overflow-hidden"
+              className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 max-w-sm w-full shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-[var(--destructive)]/10 border border-[var(--destructive)]/20 flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 text-[var(--destructive)]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--foreground)]">
+                    {deleteConfirm === "__all__" ? "Clear All Sessions" : "Delete Session"}
+                  </h3>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirm(null)}
+                  className="px-4 py-2 text-xs rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (deleteConfirm === "__all__") {
+                      clearAllSessions();
+                    } else {
+                      deleteSession(deleteConfirm);
+                    }
+                  }}
+                  className="px-4 py-2 text-xs rounded-lg bg-[var(--destructive)] text-white hover:opacity-90 transition-all duration-200"
+                >
+                  {deleteConfirm === "__all__" ? "Clear All" : "Delete"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Edit Agent Prompt modal ── */}
+      <AnimatePresence>
+        {showEditModal && (
+          <motion.div
+            variants={modalOverlay}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+            onClick={() => setShowEditModal(false)}
+          >
+            <motion.div
+              variants={modalContent}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+              className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 max-w-2xl w-full shadow-2xl max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <Edit3 className="w-4 h-4 text-[var(--accent)]" />
-                  <h2 className="text-sm font-semibold text-[var(--foreground)]">
+                  <h3 className="text-sm font-semibold text-[var(--foreground)]">
                     Edit Agent Prompt
-                  </h2>
+                  </h3>
                 </div>
                 <button
-                  onClick={() => setShowEditPrompt(false)}
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
                   className="p-1.5 rounded-lg text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
                 >
                   <X className="w-4 h-4" />
@@ -916,57 +1137,122 @@ export default function ChatPage() {
               </div>
 
               {/* Presets */}
-              <div className="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-[var(--muted-foreground)]">Presets:</span>
+              <div className="flex flex-wrap gap-1.5 mb-3">
                 {PROMPT_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
+                    type="button"
                     onClick={() => setEditPromptDraft(preset.prompt)}
-                    className="px-2.5 py-1 rounded-md text-xs border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-[var(--accent)]/40 transition-all duration-200"
+                    className="text-[10px] px-2.5 py-1 rounded-full border border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)] transition-all duration-200"
                   >
                     {preset.label}
                   </button>
                 ))}
               </div>
 
-              <div className="p-5">
-                <textarea
-                  value={editPromptDraft}
-                  onChange={(e) => setEditPromptDraft(e.target.value)}
-                  rows={12}
-                  className="w-full bg-[var(--background)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] outline-none resize-none font-mono leading-relaxed focus:border-[var(--accent)]/50 transition-colors duration-200"
-                  placeholder="Enter agent system prompt..."
-                />
-              </div>
+              <textarea
+                value={editPromptDraft}
+                onChange={(e) => setEditPromptDraft(e.target.value)}
+                className="flex-1 bg-[var(--background)] border border-[var(--border)] rounded-xl p-3 text-xs font-mono text-[var(--foreground)] outline-none resize-none focus:border-[var(--accent)]/50 transition-colors duration-200 min-h-[300px]"
+                placeholder="Enter agent system prompt..."
+              />
 
-              <div className="flex items-center justify-between px-5 py-4 border-t border-[var(--border)]">
+              <div className="flex items-center justify-between mt-4">
                 <button
+                  type="button"
                   onClick={() => setEditPromptDraft(DEFAULT_AGENT_PROMPT)}
                   className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors duration-200"
                 >
                   Reset to default
                 </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowEditPrompt(false)}
-                    className="px-4 py-2 rounded-lg text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 border border-[var(--border)] transition-all duration-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={savePrompt}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-[var(--primary)] hover:bg-[var(--primary)]/80 text-white transition-all duration-200"
-                  >
-                    {promptSaved ? (
-                      <><Check className="w-3.5 h-3.5" /> Saved!</>
-                    ) : (
-                      "Save Prompt"
-                    )}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={saveAgentPrompt}
+                  className="flex items-center gap-2 px-4 py-2 text-xs rounded-xl bg-[var(--accent)] text-[var(--background)] font-medium hover:opacity-90 transition-all duration-200"
+                >
+                  {saveStatus === "saved" ? (
+                    <><Check className="w-3.5 h-3.5" /> Saved!</>
+                  ) : (
+                    "Save Prompt"
+                  )}
+                </button>
               </div>
             </motion.div>
-          </>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── API Key modal ── */}
+      <AnimatePresence>
+        {showApiModal && (
+          <motion.div
+            variants={modalOverlay}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+            onClick={() => setShowApiModal(false)}
+          >
+            <motion.div
+              variants={modalContent}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+              className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 max-w-md w-full shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[var(--accent)]" />
+                  <h3 className="text-sm font-semibold text-[var(--foreground)]">
+                    API Key Configuration
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowApiModal(false)}
+                  className="p-1.5 rounded-lg text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5 transition-all duration-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-[var(--muted-foreground)] mb-4">
+                Enter your LLM API key. It is stored locally in your browser and never sent to our servers.
+              </p>
+
+              <div className="relative">
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKeyDraft}
+                  onChange={(e) => setApiKeyDraft(e.target.value)}
+                  placeholder="sk-ant-... or your API key"
+                  className="w-full bg-[var(--background)] border border-[var(--border)] rounded-xl px-3 py-2.5 text-sm font-mono text-[var(--foreground)] outline-none focus:border-[var(--accent)]/50 transition-colors duration-200 pr-16"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors duration-200"
+                >
+                  {showApiKey ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              <div className="flex justify-end mt-4">
+                <button
+                  type="button"
+                  onClick={saveApiKey}
+                  className="flex items-center gap-2 px-4 py-2 text-xs rounded-xl bg-[var(--accent)] text-[var(--background)] font-medium hover:opacity-90 transition-all duration-200"
+                >
+                  {saveStatus === "saved" ? (
+                    <><Check className="w-3.5 h-3.5" /> Saved!</>
+                  ) : (
+                    "Save Key"
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
